@@ -9,8 +9,12 @@ import {
   VolumeX,
   Coins,
   Trophy,
-  Gamepad2,
+  Sun,
+  Sunset,
+  Moon,
+  Sunrise,
   ArrowUp,
+  Waves,
 } from 'lucide-react';
 
 export default function TMDash() {
@@ -25,7 +29,9 @@ export default function TMDash() {
   const [totalCoins, setTotalCoins] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [timeOfDay, setTimeOfDay] = useState<string>('Daytime');
   const bestRef = useRef(0);
+  const lastTouchTime = useRef(0);
 
   useEffect(() => {
     bestRef.current = best;
@@ -48,6 +54,9 @@ export default function TMDash() {
         setBest(engine.getBest());
         setTotalCoins(engine.getTotalCoins());
       },
+      onTimeOfDayChange: (tod) => {
+        setTimeOfDay(tod);
+      },
     });
     engineRef.current = engine;
     setBest(engine.getBest());
@@ -56,7 +65,8 @@ export default function TMDash() {
     const onResize = () => engine.resize();
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
-    // start render loop in 'ready' state for animated idle background
+
+    // Initial render loop for animated idle background on start screen
     requestAnimationFrame(() => {
       engine.resize();
       engine.idleRender();
@@ -68,6 +78,17 @@ export default function TMDash() {
       engine.destroy();
     };
   }, []);
+
+  // Update time of day periodically from engine
+  useEffect(() => {
+    if (state !== 'running') return;
+    const timer = setInterval(() => {
+      if (engineRef.current) {
+        setTimeOfDay(engineRef.current.getTimeOfDayName());
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [state]);
 
   const handleStart = useCallback(() => {
     engineRef.current?.resumeAudio();
@@ -98,13 +119,32 @@ export default function TMDash() {
     engineRef.current?.jump();
   }, [state, handleStart, handleRestart]);
 
+  // Debounced input to avoid double-triggering across touchstart and pointerdown
+  const handleTouchJump = useCallback(() => {
+    const now = performance.now();
+    if (now - lastTouchTime.current < 90) return;
+    lastTouchTime.current = now;
+    handleJump();
+  }, [handleJump]);
+
   const toggleSound = useCallback(() => {
     const next = !soundOn;
     setSoundOn(next);
     engineRef.current?.setSoundEnabled(next);
   }, [soundOn]);
 
-  // keyboard
+  // Handle visibility change: safely pause when app is switched to background
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden && state === 'running') {
+        engineRef.current?.togglePause();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [state]);
+
+  // Keyboard controls
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'ArrowUp') {
@@ -123,7 +163,7 @@ export default function TMDash() {
     return () => window.removeEventListener('keydown', onKey);
   }, [state, handleJump, handlePause, handleStart, handleRestart]);
 
-  // prevent touch scrolling / pinch over the game and trigger instant touch jump
+  // Mobile direct touch on canvas
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -131,7 +171,7 @@ export default function TMDash() {
       const target = e.target as HTMLElement;
       if (target.closest('button')) return;
       e.preventDefault();
-      handleJump();
+      handleTouchJump();
     };
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
@@ -142,117 +182,154 @@ export default function TMDash() {
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
     };
-  }, [handleJump]);
+  }, [handleTouchJump]);
 
   const fmt = (n: number) => n.toLocaleString();
 
+  // Time of day icon
+  const renderTimeIcon = () => {
+    switch (timeOfDay) {
+      case 'Sunrise':
+        return <Sunrise className="w-3.5 h-3.5 text-amber-300" />;
+      case 'Sunset':
+        return <Sunset className="w-3.5 h-3.5 text-orange-400" />;
+      case 'Night':
+        return <Moon className="w-3.5 h-3.5 text-indigo-300" />;
+      default:
+        return <Sun className="w-3.5 h-3.5 text-yellow-300" />;
+    }
+  };
+
   return (
-    <div className="min-h-screen w-full bg-[#05070f] text-white flex flex-col items-center justify-center px-3 py-4 select-none overflow-hidden">
-      {/* ambient glow */}
-      <div className="pointer-events-none fixed inset-0 opacity-60">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-cyan-500/10 blur-[120px] rounded-full" />
-        <div className="absolute bottom-0 left-1/4 w-[400px] h-[300px] bg-fuchsia-500/10 blur-[120px] rounded-full" />
+    <div
+      className="relative w-full h-[100dvh] max-h-[100dvh] bg-[#050b14] text-white flex flex-col justify-between items-center px-2 sm:px-4 py-1.5 sm:py-2 select-none overflow-hidden touch-none"
+      style={{
+        paddingTop: 'max(0.4rem, var(--sat))',
+        paddingBottom: 'max(0.4rem, var(--sab))',
+        paddingLeft: 'max(0.5rem, var(--sal))',
+        paddingRight: 'max(0.5rem, var(--sar))',
+      }}
+    >
+      {/* Ambient background glow */}
+      <div className="pointer-events-none fixed inset-0 opacity-40">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-amber-500/10 blur-[130px] rounded-full" />
+        <div className="absolute bottom-0 left-1/4 w-[400px] h-[300px] bg-cyan-500/10 blur-[130px] rounded-full" />
       </div>
 
-      <header className="relative z-10 mb-2 flex items-center gap-2">
-        <Gamepad2 className="w-7 h-7 text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
-        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-[0.2em]">
-          <span className="text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.8)]">TM</span>{' '}
-          <span className="text-fuchsia-400 drop-shadow-[0_0_12px_rgba(232,121,249,0.8)]">DASH</span>
-        </h1>
+      {/* Header bar */}
+      <header className="relative z-10 w-full max-w-[1000px] flex items-center justify-between px-1 py-0.5">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <Waves className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+          <h1 className="text-lg sm:text-2xl font-extrabold tracking-wider">
+            <span className="text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">TM</span>{' '}
+            <span className="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.8)]">DASH</span>
+            <span className="hidden sm:inline-block ml-2 text-xs font-mono font-normal text-amber-300/70 border border-amber-400/30 px-2 py-0.5 rounded-full">
+              BEACH RUNNER
+            </span>
+          </h1>
+        </div>
+
+        {/* Character badges */}
+        <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono">
+          <span className="text-white/40 text-[10px] uppercase">Roster:</span>
+          <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-400/50 text-cyan-300 font-bold">TM</span>
+          <span className="px-1.5 py-0.5 rounded bg-amber-950/80 border border-orange-400/50 text-orange-400 font-bold">EFOT</span>
+          <span className="px-1.5 py-0.5 rounded bg-purple-950/80 border border-fuchsia-400/50 text-fuchsia-300 font-bold">DADA</span>
+          <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-400/50 text-emerald-300 font-bold">HM</span>
+          <span className="px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-400/50 text-rose-300 font-bold">CM</span>
+        </div>
+
+        {/* Time of Day Badge */}
+        <div className="flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
+          {renderTimeIcon()}
+          <span className="capitalize text-white/90 font-medium">{timeOfDay}</span>
+        </div>
       </header>
 
-      {/* HUD */}
-      <div className="relative z-10 w-full max-w-[900px] flex items-center justify-between px-2 mb-1.5 text-sm font-mono">
+      {/* HUD Bar */}
+      <div className="relative z-10 w-full max-w-[1000px] flex items-center justify-between px-2 text-xs sm:text-sm font-mono my-0.5">
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-cyan-300">
-            <span className="text-cyan-500/70 text-xs">SCORE</span>
-            <span className="text-lg font-bold tabular-nums drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]">
+          <span className="flex items-center gap-1 text-cyan-300">
+            <span className="text-cyan-500/70 text-[11px]">SCORE</span>
+            <span className="text-base sm:text-lg font-bold tabular-nums drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]">
               {fmt(score)}
             </span>
           </span>
-          <span className="flex items-center gap-1.5 text-amber-300">
-            <Coins className="w-4 h-4 text-amber-400" />
+          <span className="flex items-center gap-1 text-amber-300">
+            <Coins className="w-3.5 h-3.5 text-amber-400" />
             <span className="font-bold tabular-nums">{coins}</span>
           </span>
-          {/* Chasers indicator badge */}
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 font-sans">
-            <span className="text-white/40 text-[10px] uppercase tracking-wider">Chasers:</span>
-            <span className="text-orange-400 font-semibold drop-shadow-[0_0_6px_rgba(251,146,60,0.6)]">EFOT</span>
-            <span className="text-white/20">&bull;</span>
-            <span className="text-fuchsia-400 font-semibold drop-shadow-[0_0_6px_rgba(232,121,249,0.6)]">DADA</span>
-          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-fuchsia-300">
-            <Trophy className="w-4 h-4 text-fuchsia-400" />
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="flex items-center gap-1 text-fuchsia-300">
+            <Trophy className="w-3.5 h-3.5 text-fuchsia-400" />
             <span className="font-bold tabular-nums">{fmt(best)}</span>
           </span>
           <button
             onClick={toggleSound}
-            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition"
+            className="p-1 sm:p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95"
             aria-label={soundOn ? 'Mute sound' : 'Unmute sound'}
           >
             {soundOn ? (
-              <Volume2 className="w-4 h-4 text-cyan-300" />
+              <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-300" />
             ) : (
-              <VolumeX className="w-4 h-4 text-white/50" />
+              <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white/50" />
             )}
           </button>
           {state === 'running' && (
             <button
               onClick={handlePause}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition"
+              className="p-1 sm:p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95"
               aria-label="Pause"
             >
-              <Pause className="w-4 h-4 text-white" />
+              <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
             </button>
           )}
           {state === 'paused' && (
             <button
               onClick={handlePause}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition"
+              className="p-1 sm:p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95"
               aria-label="Resume"
             >
-              <Play className="w-4 h-4 text-white" />
+              <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
             </button>
           )}
         </div>
       </div>
 
-      {/* Game stage */}
+      {/* Main Game Stage Container */}
       <div
         ref={wrapRef}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
           if (target.closest('button')) return;
-          handleJump();
+          handleTouchJump();
         }}
-        className="relative z-10 w-full max-w-[900px] aspect-[900/360] rounded-2xl overflow-hidden border border-cyan-500/30 shadow-[0_0_40px_rgba(34,211,238,0.15)] touch-none bg-[#070b1a] cursor-pointer"
+        className="relative z-10 w-full max-w-[1000px] flex-1 max-h-[calc(100dvh-130px)] aspect-[900/360] rounded-2xl overflow-hidden border border-amber-500/30 shadow-[0_0_40px_rgba(251,191,36,0.15)] touch-none bg-[#091524] cursor-pointer mx-auto flex items-center justify-center"
       >
-        <canvas ref={canvasRef} className="block w-full h-full" />
+        <canvas ref={canvasRef} className="block w-full h-full object-contain" />
 
         {/* Start screen */}
         {state === 'ready' && (
           <Overlay>
-            <div className="text-center px-6">
-              <div className="text-5xl mb-3 font-extrabold tracking-widest">
+            <div className="text-center px-4 sm:px-6 max-w-md">
+              <div className="text-3xl sm:text-5xl mb-2 font-extrabold tracking-widest">
                 <span className="text-cyan-400 drop-shadow-[0_0_20px_rgba(34,211,238,0.9)]">TM</span>{' '}
-                <span className="text-fuchsia-400 drop-shadow-[0_0_20px_rgba(232,121,249,0.9)]">DASH</span>
+                <span className="text-amber-400 drop-shadow-[0_0_20px_rgba(251,191,36,0.9)]">DASH</span>
               </div>
-              <p className="text-white/80 mb-3 text-xs sm:text-sm max-w-sm mx-auto leading-relaxed">
-                Run as <span className="text-cyan-300 font-bold">TM</span> while dodging obstacles and escaping <span className="text-orange-400 font-bold">EFOT</span> & <span className="text-fuchsia-400 font-bold">DADA</span>!
+              <p className="text-white/85 mb-2.5 text-xs sm:text-sm leading-relaxed">
+                Run along the tropical beach as <strong className="text-cyan-300">TM</strong>! Dodge driftwood, rolling beach balls & rocks while outrunning <strong className="text-orange-400">EFOT</strong> & <strong className="text-fuchsia-400">DADA</strong> and waving to scooter riders <strong className="text-emerald-300">HM</strong> & <strong className="text-rose-300">CM</strong>!
               </p>
-              <div className="mb-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-400/30 text-amber-300 text-xs font-mono">
+              <div className="mb-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[11px] sm:text-xs font-mono">
                 <span>⚠️ When you see <strong className="text-white">! SWING</strong>, jump to dodge the stick!</span>
               </div>
               <div>
                 <NeonButton onClick={handleStart} variant="cyan">
-                  <Play className="w-5 h-5" /> PLAY
+                  <Play className="w-5 h-5" /> PLAY BEACH DASH
                 </NeonButton>
               </div>
-              <div className="mt-4 text-xs text-white/50 font-mono space-y-1">
-                <p>SPACE / ↑ / TAP ANYWHERE to jump (double-jump in air)</p>
+              <div className="mt-3 text-[11px] sm:text-xs text-white/50 font-mono space-y-0.5">
+                <p>SPACE / ↑ / TAP to jump (double-jump in air)</p>
                 <p>P or ESC to pause</p>
               </div>
             </div>
@@ -262,14 +339,17 @@ export default function TMDash() {
         {/* Paused */}
         {state === 'paused' && (
           <Overlay>
-            <div className="text-center">
-              <div className="text-3xl font-extrabold tracking-widest text-cyan-300 mb-4 drop-shadow-[0_0_16px_rgba(34,211,238,0.7)]">
+            <div className="text-center px-4">
+              <div className="text-2xl sm:text-3xl font-extrabold tracking-widest text-cyan-300 mb-3 drop-shadow-[0_0_16px_rgba(34,211,238,0.7)]">
                 PAUSED
+              </div>
+              <div className="mb-2 text-xs font-mono text-white/70">
+                Current Time: <span className="text-amber-300 font-bold">{timeOfDay}</span>
               </div>
               <NeonButton onClick={handlePause} variant="cyan">
                 <Play className="w-5 h-5" /> RESUME
               </NeonButton>
-              <div className="mt-3">
+              <div className="mt-2.5">
                 <NeonButton onClick={handleRestart} variant="muted" small>
                   <RotateCcw className="w-4 h-4" /> Restart
                 </NeonButton>
@@ -281,27 +361,27 @@ export default function TMDash() {
         {/* Game over */}
         {state === 'gameover' && (
           <Overlay>
-            <div className="text-center px-6">
-              <div className="text-3xl font-extrabold tracking-widest text-rose-400 mb-2 drop-shadow-[0_0_16px_rgba(251,113,133,0.8)]">
+            <div className="text-center px-4 sm:px-6 max-w-sm">
+              <div className="text-2xl sm:text-3xl font-extrabold tracking-widest text-rose-400 mb-1.5 drop-shadow-[0_0_16px_rgba(251,113,133,0.8)]">
                 GAME OVER
               </div>
               {isNewBest && (
-                <div className="text-amber-300 text-sm font-bold mb-2 animate-pulse flex items-center justify-center gap-1.5">
-                  <Trophy className="w-4 h-4" /> NEW BEST!
+                <div className="text-amber-300 text-xs sm:text-sm font-bold mb-2 animate-pulse flex items-center justify-center gap-1.5">
+                  <Trophy className="w-4 h-4" /> NEW BEACH BEST!
                 </div>
               )}
-              <div className="flex justify-center gap-6 mb-5 font-mono">
+              <div className="flex justify-center gap-4 sm:gap-6 mb-4 font-mono">
                 <div>
-                  <div className="text-xs text-white/50">SCORE</div>
-                  <div className="text-2xl font-bold text-cyan-300">{fmt(score)}</div>
+                  <div className="text-[10px] text-white/50">SCORE</div>
+                  <div className="text-xl sm:text-2xl font-bold text-cyan-300">{fmt(score)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-white/50">COINS</div>
-                  <div className="text-2xl font-bold text-amber-300">{coins}</div>
+                  <div className="text-[10px] text-white/50">COINS</div>
+                  <div className="text-xl sm:text-2xl font-bold text-amber-300">{coins}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-white/50">BEST</div>
-                  <div className="text-2xl font-bold text-fuchsia-300">{fmt(best)}</div>
+                  <div className="text-[10px] text-white/50">BEST</div>
+                  <div className="text-xl sm:text-2xl font-bold text-fuchsia-300">{fmt(best)}</div>
                 </div>
               </div>
               <NeonButton onClick={handleRestart} variant="cyan">
@@ -312,33 +392,36 @@ export default function TMDash() {
         )}
       </div>
 
-      {/* Mobile jump button */}
-      <button
-        onPointerDown={(e) => {
-          e.preventDefault();
-          handleJump();
-        }}
-        className="md:hidden mt-3 z-10 w-20 h-20 rounded-full bg-cyan-500/20 border-2 border-cyan-400/60 text-cyan-200 flex flex-col items-center justify-center active:bg-cyan-500/40 active:scale-95 transition shadow-[0_0_30px_rgba(34,211,238,0.4)]"
-        aria-label="Jump"
-      >
-        <ArrowUp className="w-8 h-8" />
-        <span className="text-[10px] font-bold tracking-wider -mt-1 font-mono">JUMP</span>
-      </button>
+      {/* Footer / Mobile Controls */}
+      <footer className="relative z-10 w-full max-w-[1000px] flex items-center justify-between px-2 pt-1 pb-0.5">
+        <div className="text-[11px] text-white/40 font-mono">
+          Total Coins: <span className="text-amber-400 font-bold">{totalCoins}</span>
+        </div>
 
-      <p className="hidden md:block relative z-10 mt-3 text-xs text-white/40 font-mono">
-        Press SPACE or click anywhere on the game to jump (double-jump to dodge swings)
-      </p>
+        {/* Mobile On-Screen Jump Button */}
+        <button
+          onPointerDown={(e) => {
+            e.preventDefault();
+            handleTouchJump();
+          }}
+          className="md:hidden w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-cyan-500/25 border-2 border-cyan-400/70 text-cyan-100 flex flex-col items-center justify-center active:bg-cyan-500/50 active:scale-95 transition shadow-[0_0_24px_rgba(34,211,238,0.5)] touch-none cursor-pointer"
+          aria-label="Jump"
+        >
+          <ArrowUp className="w-7 h-7" />
+          <span className="text-[9px] font-bold tracking-wider -mt-1 font-mono">JUMP</span>
+        </button>
 
-      <div className="relative z-10 mt-2 text-[11px] text-white/30 font-mono">
-        Total coins collected: {totalCoins}
-      </div>
+        <p className="hidden md:block text-xs text-white/40 font-mono">
+          SPACE / ↑ to jump • Jump over stick attacks
+        </p>
+      </footer>
     </div>
   );
 }
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/55 backdrop-blur-sm animate-[fadeIn_0.2s_ease]">
+    <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease]">
       {children}
     </div>
   );
@@ -356,14 +439,14 @@ function NeonButton({
   small?: boolean;
 }) {
   const styles = {
-    cyan: 'border-cyan-400/70 text-cyan-200 shadow-[0_0_24px_rgba(34,211,238,0.35)] hover:bg-cyan-400/20 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)]',
+    cyan: 'border-cyan-400/70 text-cyan-100 shadow-[0_0_24px_rgba(34,211,238,0.35)] hover:bg-cyan-400/20 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)]',
     fuchsia: 'border-fuchsia-400/70 text-fuchsia-200 shadow-[0_0_24px_rgba(232,121,249,0.35)] hover:bg-fuchsia-400/20',
     muted: 'border-white/30 text-white/80 hover:bg-white/10',
   }[variant];
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-2 ${small ? 'px-4 py-2 text-sm' : 'px-7 py-3 text-base'} font-bold tracking-wider rounded-xl border-2 bg-white/5 transition active:scale-95 ${styles}`}
+      className={`inline-flex items-center justify-center gap-2 ${small ? 'px-4 py-1.5 text-xs' : 'px-6 py-2.5 text-sm sm:text-base'} font-bold tracking-wider rounded-xl border-2 bg-white/5 transition active:scale-95 ${styles} cursor-pointer`}
     >
       {children}
     </button>

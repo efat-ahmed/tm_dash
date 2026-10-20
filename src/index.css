@@ -7,12 +7,25 @@
   to { opacity: 1; }
 }
 
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
 html, body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  height: 100%;
+  width: 100%;
 }
 
 body {
   margin: 0;
-  background: #05070f;
+  background: #050b14;
+  overflow: hidden;
 }

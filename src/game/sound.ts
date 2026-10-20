@@ -1,4 +1,4 @@
-type SoundName = 'jump' | 'coin' | 'crash' | 'click' | 'start' | 'warning' | 'swing' | 'whack';
+type SoundName = 'jump' | 'coin' | 'crash' | 'click' | 'start' | 'warning' | 'swing' | 'whack' | 'beep' | 'splash';
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -132,6 +132,30 @@ export class SoundManager {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
       osc.start(now);
       osc.stop(now + 0.19);
+    } else if (name === 'beep') {
+      // Cheerful dual-tone scooter horn (e.g. 520Hz + 780Hz)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(680, now);
+      osc.frequency.setValueAtTime(860, now + 0.07);
+      g.gain.setValueAtTime(0.25, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.start(now);
+      osc.stop(now + 0.17);
+    } else if (name === 'splash') {
+      // Ocean wave / sand splash
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.35));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const splashGain = ctx.createGain();
+      splashGain.gain.setValueAtTime(0.3, now);
+      splashGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
+      src.connect(splashGain);
+      splashGain.connect(out);
+      src.start(now);
     }
   }
 }

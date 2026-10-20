@@ -5,6 +5,7 @@ export interface EngineCallbacks {
   onScore: (score: number, coins: number) => void;
   onGameOver: (score: number, coins: number, best: number) => void;
   onReady?: () => void;
+  onTimeOfDayChange?: (timeOfDay: string) => void;
 }
 
 export interface Player {
@@ -18,13 +19,25 @@ export interface Player {
   runFrame: number;
 }
 
+export type ObstacleType =
+  | 'block'
+  | 'tall'
+  | 'spike'
+  | 'driftwood'
+  | 'rock'
+  | 'beachball'
+  | 'sandmound'
+  | 'umbrella';
+
 export interface Obstacle {
   x: number;
   y: number;
   w: number;
   h: number;
-  type: 'block' | 'tall' | 'spike';
+  type: ObstacleType;
   scored: boolean;
+  rotation?: number; // for rolling beachball
+  colorIndex?: number;
 }
 
 export interface Coin {
@@ -77,3 +90,27 @@ export interface Chaser {
   lungeX: number; // temporary forward surge during strike
 }
 
+export interface ScooterRider {
+  id: 'HM' | 'CM';
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  speed: number;
+  vy: number;
+  onGround: boolean;
+  wheelRotation: number;
+  bobPhase: number;
+  active: boolean;
+  spawnCooldown: number;
+  colorTheme: {
+    rider: string;
+    shirt: string;
+    scooter: string;
+    wheels: string;
+    accent: string;
+    labelColor: string;
+    labelBg: string;
+  };
+}
