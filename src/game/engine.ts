@@ -67,19 +67,21 @@ export class GameEngine {
   private coins: Coin[] = [];
   private particles: Particle[] = [];
 
-  private speed = 6;
-  private baseSpeed = 6;
-  private maxSpeed = 18;
+  // Balanced speeds: ~30% slower base speed, gradual progression, capped max speed
+  private speed = 4.0;
+  private baseSpeed = 4.0;
+  private maxSpeed = 7.8;
   private distance = 0;
   private score = 0;
   private coinCount = 0;
   private best = 0;
   private totalCoinsSaved = 0;
 
+  // Generous obstacle and coin spacing
   private spawnTimer = 0;
-  private nextSpawn = 90;
+  private nextSpawn = 180; // ~3.0s initial breathing room
   private coinTimer = 0;
-  private nextCoin = 140;
+  private nextCoin = 160;
 
   // Background and environment state
   private waveOffset = 0;
@@ -88,7 +90,7 @@ export class GameEngine {
   private shake = 0;
   private flash = 0;
   private timeAlive = 0;
-  readonly dayCycleDuration = 72; // seconds for a full 24h continuous cycle
+  readonly dayCycleDuration = 76; // seconds for a full 24h continuous cycle
 
   // Pre-generated static scenery elements
   private clouds: { x: number; y: number; w: number; h: number; speed: number; opacity: number }[] = [];
@@ -108,8 +110,10 @@ export class GameEngine {
     this.best = Number(localStorage.getItem(BEST_KEY) || 0);
     this.totalCoinsSaved = Number(localStorage.getItem(COIN_KEY) || 0);
 
+    // TM starts at x=200, giving 130px+ clearance for followers behind,
+    // and 700px of forward visibility ahead for obstacles
     this.player = {
-      x: 120,
+      x: 200,
       y: this.groundY - 48,
       w: 38,
       h: 48,
@@ -144,14 +148,14 @@ export class GameEngine {
   idleRender() {
     cancelAnimationFrame(this.idleRaf);
     if (this.state !== 'ready') return;
-    this.waveOffset = (this.waveOffset + 0.8) % 600;
-    this.cloudOffset = (this.cloudOffset + 0.15) % 900;
-    this.sandOffset = (this.sandOffset + 2) % 60;
+    this.waveOffset = (this.waveOffset + 0.6) % 600;
+    this.cloudOffset = (this.cloudOffset + 0.12) % 900;
+    this.sandOffset = (this.sandOffset + 1.4) % 60;
     this.timeAlive += 0.016;
 
-    this.player.runFrame += 0.15;
+    this.player.runFrame += 0.12;
     for (const c of this.chasers) {
-      c.runFrame += 0.15;
+      c.runFrame += 0.12;
     }
 
     this.render();
@@ -179,12 +183,12 @@ export class GameEngine {
     if (this.state !== 'running') return;
     if (this.player.jumpsLeft <= 0) return;
     const isFirst = this.player.onGround;
-    this.player.vy = isFirst ? -13.5 : -11;
+    // Smoother, floaty jump tuned for 4.0 speed
+    this.player.vy = isFirst ? -11.6 : -9.8;
     this.player.onGround = false;
     this.player.jumpsLeft -= 1;
     this.sound.play('jump');
-    // sand burst particles
-    this.spawnSandDust(this.player.x + 8, this.groundY, 8);
+    this.spawnSandDust(this.player.x + 8, this.groundY, 6);
   }
 
   setSoundEnabled(enabled: boolean) {
@@ -273,12 +277,14 @@ export class GameEngine {
   }
 
   private initChasers(): Chaser[] {
+    // EFOT and DADA follow from 130px to 210px behind TM (which is at x=200)
+    // 2-3x farther than original 58px distance!
     return [
       {
         id: 'EFOT',
         name: 'EFOT',
-        baseX: 62,
-        x: 62,
+        baseX: 70, // 130px behind TM
+        x: 70,
         y: this.groundY - 46,
         w: 36,
         h: 46,
@@ -296,7 +302,7 @@ export class GameEngine {
         },
         attackPhase: 'idle',
         phaseTimer: 0,
-        attackCooldown: 6.0,
+        attackCooldown: 20.0, // Generous 20s initial grace period!
         stickAngle: -0.6,
         stickLength: 46,
         lungeX: 0,
@@ -304,8 +310,8 @@ export class GameEngine {
       {
         id: 'DADA',
         name: 'DADA',
-        baseX: 14,
-        x: 14,
+        baseX: -5, // 205px behind TM, 75px behind EFOT
+        x: -5,
         y: this.groundY - 46,
         w: 36,
         h: 46,
@@ -323,7 +329,7 @@ export class GameEngine {
         },
         attackPhase: 'idle',
         phaseTimer: 0,
-        attackCooldown: 13.0,
+        attackCooldown: 36.0, // Generous 36s initial grace period!
         stickAngle: -0.6,
         stickLength: 46,
         lungeX: 0,
@@ -340,13 +346,13 @@ export class GameEngine {
         y: this.groundY - 48,
         w: 48,
         h: 48,
-        speed: 7.5,
+        speed: 3.5, // Slower, relaxed beach cruising speed (was 7.5)
         vy: 0,
         onGround: true,
         wheelRotation: 0,
         bobPhase: 0,
         active: false,
-        spawnCooldown: 10,
+        spawnCooldown: 18,
         colorTheme: {
           rider: '#059669',
           shirt: '#10b981',
@@ -364,13 +370,13 @@ export class GameEngine {
         y: this.groundY - 48,
         w: 48,
         h: 48,
-        speed: 8.5,
+        speed: 4.2, // Slower, relaxed beach cruising speed (was 8.5)
         vy: 0,
         onGround: true,
         wheelRotation: 0,
         bobPhase: 1.5,
         active: false,
-        spawnCooldown: 22,
+        spawnCooldown: 36,
         colorTheme: {
           rider: '#e11d48',
           shirt: '#fb7185',
@@ -400,11 +406,12 @@ export class GameEngine {
     this.coins = [];
     this.particles = [];
     this.spawnTimer = 0;
-    this.nextSpawn = 80;
+    this.nextSpawn = 180;
     this.coinTimer = 0;
-    this.nextCoin = 120;
+    this.nextCoin = 160;
     this.shake = 0;
     this.flash = 0;
+    this.player.x = 200;
     this.player.y = this.groundY - this.player.h;
     this.player.vy = 0;
     this.player.onGround = true;
@@ -428,46 +435,56 @@ export class GameEngine {
     const step = dt * 60; // normalize to 60fps unit steps
     this.timeAlive += dt;
 
-    // Difficulty curve
+    // Very gentle and gradual difficulty curve, capped at 7.8 max speed (was 18)
     this.speed = Math.min(
       this.maxSpeed,
-      this.baseSpeed + this.distance * 0.0012
+      this.baseSpeed + this.distance * 0.0003
     );
     this.distance += this.speed * step;
-    this.score = Math.floor(this.distance / 6);
+    this.score = Math.floor(this.distance / 7);
     this.cb.onScore(this.score, this.coinCount);
 
-    // Player physics
-    const gravity = 0.75;
+    // Player physics — gentle gravity for smooth floaty jumps
+    const gravity = 0.58;
     this.player.vy += gravity * step;
     this.player.y += this.player.vy * step;
     if (this.player.y >= this.groundY - this.player.h) {
       this.player.y = this.groundY - this.player.h;
-      if (!this.player.onGround) this.spawnSandDust(this.player.x + 8, this.groundY, 5);
+      if (!this.player.onGround) this.spawnSandDust(this.player.x + 8, this.groundY, 4);
       this.player.vy = 0;
       this.player.onGround = true;
       this.player.jumpsLeft = 2;
     }
-    this.player.runFrame += step * 0.4;
+    this.player.runFrame += step * 0.28;
 
-    // Background & beach offsets
-    this.waveOffset = (this.waveOffset + this.speed * step * 0.25) % 600;
-    this.cloudOffset = (this.cloudOffset + this.speed * step * 0.06) % 900;
-    this.sandOffset = (this.sandOffset + this.speed * step) % 60;
+    // Background & beach offsets — smooth, relaxed scrolling
+    this.waveOffset = (this.waveOffset + this.speed * step * 0.18) % 600;
+    this.cloudOffset = (this.cloudOffset + this.speed * step * 0.04) % 900;
+    this.sandOffset = (this.sandOffset + this.speed * step * 0.8) % 60;
 
-    // Spawn beach obstacles
+    // Check if a scooter rider is currently passing across the center screen
+    const isScooterCrossing = this.scooters.some(
+      (s) => s.active && s.x > 250 && s.x < 750
+    );
+
+    // Spawn beach obstacles with fair, generous intervals
     this.spawnTimer += step;
     if (this.spawnTimer >= this.nextSpawn) {
-      this.spawnTimer = 0;
-      this.nextSpawn = this.randomSpawnGap();
-      this.spawnBeachObstacle();
+      if (!isScooterCrossing) {
+        this.spawnTimer = 0;
+        this.nextSpawn = this.randomSpawnGap();
+        this.spawnBeachObstacle();
+      } else {
+        // Defer obstacle slightly while scooter is passing to prevent clutter
+        this.spawnTimer = this.nextSpawn - 40;
+      }
     }
 
     // Spawn coins
     this.coinTimer += step;
     if (this.coinTimer >= this.nextCoin) {
       this.coinTimer = 0;
-      this.nextCoin = 90 + Math.random() * 140;
+      this.nextCoin = 130 + Math.random() * 120;
       this.spawnCoinPattern();
     }
 
@@ -475,7 +492,7 @@ export class GameEngine {
     for (const o of this.obstacles) {
       o.x -= this.speed * step;
       if (o.type === 'beachball' && o.rotation !== undefined) {
-        o.rotation += step * 0.12;
+        o.rotation += step * 0.08;
       }
     }
     this.obstacles = this.obstacles.filter((o) => o.x + o.w > -30);
@@ -483,7 +500,7 @@ export class GameEngine {
     // Move coins
     for (const c of this.coins) {
       c.x -= this.speed * step;
-      c.phase += step * 0.15;
+      c.phase += step * 0.12;
     }
     this.coins = this.coins.filter((c) => !c.collected && c.x + c.r > -20);
 
@@ -511,46 +528,47 @@ export class GameEngine {
     if (this.flash > 0) this.flash = Math.max(0, this.flash - step * 0.05);
 
     // Beach sand dust while running
-    if (this.player.onGround && Math.random() < 0.08 * step) {
+    if (this.player.onGround && Math.random() < 0.06 * step) {
       this.spawnSandDust(this.player.x, this.groundY, 1);
     }
   }
 
+  // Generous gap between obstacles: 140 to 240 frames (~2.3s to 4.0s)
   private randomSpawnGap(): number {
-    const base = 110 - (this.speed - this.baseSpeed) * 4;
-    return Math.max(55, base + Math.random() * 60);
+    const base = 180 - (this.speed - this.baseSpeed) * 8;
+    return Math.max(140, base + Math.random() * 90);
   }
 
   private spawnBeachObstacle() {
     const r = Math.random();
     let type: ObstacleType;
     let w = 36;
-    let h = 32;
+    let h = 26;
 
-    if (r < 0.28) {
+    if (r < 0.32) {
       type = 'driftwood';
-      w = 44 + Math.random() * 10;
-      h = 24 + Math.random() * 6;
-    } else if (r < 0.50) {
+      w = 42 + Math.random() * 8;
+      h = 22; // Low profile, easy to jump
+    } else if (r < 0.56) {
       type = 'beachball';
-      w = 34;
-      h = 34;
-    } else if (r < 0.72) {
+      w = 32;
+      h = 32;
+    } else if (r < 0.76) {
       type = 'rock';
-      w = 36 + Math.random() * 8;
-      h = 30 + Math.random() * 8;
-    } else if (r < 0.88) {
+      w = 34 + Math.random() * 6;
+      h = 26;
+    } else if (r < 0.90) {
       type = 'sandmound';
-      w = 46 + Math.random() * 12;
-      h = 26 + Math.random() * 6;
+      w = 44 + Math.random() * 8;
+      h = 24;
     } else {
       type = 'umbrella';
-      w = 36;
-      h = 60 + Math.random() * 12;
+      w = 34;
+      h = 56;
     }
 
     this.obstacles.push({
-      x: this.W + 30,
+      x: this.W + 40,
       y: this.groundY - h,
       w,
       h,
@@ -563,14 +581,14 @@ export class GameEngine {
 
   private spawnCoinPattern() {
     const pattern = Math.floor(Math.random() * 3);
-    const baseY = this.groundY - 60 - Math.random() * 70;
-    const count = 3 + Math.floor(Math.random() * 4);
+    const baseY = this.groundY - 55 - Math.random() * 55;
+    const count = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < count; i++) {
       let y = baseY;
-      if (pattern === 1) y = baseY + Math.sin(i * 0.7) * 24;
-      if (pattern === 2) y = baseY - i * 10;
+      if (pattern === 1) y = baseY + Math.sin(i * 0.7) * 20;
+      if (pattern === 2) y = baseY - i * 8;
       this.coins.push({
-        x: this.W + 30 + i * 38,
+        x: this.W + 40 + i * 40,
         y,
         r: 9,
         collected: false,
@@ -582,15 +600,15 @@ export class GameEngine {
   private spawnSandDust(x: number, y: number, n: number) {
     for (let i = 0; i < n; i++) {
       this.particles.push({
-        x: x + (Math.random() - 0.5) * 18,
-        y: y - Math.random() * 5,
-        vx: -this.speed * 0.3 + (Math.random() - 0.5) * 2,
-        vy: -Math.random() * 2,
+        x: x + (Math.random() - 0.5) * 16,
+        y: y - Math.random() * 4,
+        vx: -this.speed * 0.25 + (Math.random() - 0.5) * 1.5,
+        vy: -Math.random() * 1.8,
         life: 18 + Math.random() * 12,
         maxLife: 30,
-        size: 2 + Math.random() * 3,
+        size: 2 + Math.random() * 2.5,
         color: 'rgba(235,190,120,',
-        gravity: 0.06,
+        gravity: 0.05,
       });
     }
   }
@@ -598,7 +616,7 @@ export class GameEngine {
   private burst(x: number, y: number, color: string, n: number) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const s = 1 + Math.random() * 4;
+      const s = 1 + Math.random() * 3.5;
       this.particles.push({
         x,
         y,
@@ -606,9 +624,9 @@ export class GameEngine {
         vy: Math.sin(a) * s,
         life: 20 + Math.random() * 20,
         maxLife: 40,
-        size: 2 + Math.random() * 4,
+        size: 2 + Math.random() * 3.5,
         color,
-        gravity: 0.1,
+        gravity: 0.08,
       });
     }
   }
@@ -620,27 +638,25 @@ export class GameEngine {
       if (!sc.active) {
         sc.spawnCooldown -= dt;
         if (sc.spawnCooldown <= 0) {
-          // Check that other scooter isn't right at entrance
           const other = this.scooters.find((s) => s.id !== sc.id);
-          if (!other || !other.active || other.x < this.W - 120) {
+          // Never spawn right on top of each other
+          if (!other || !other.active || other.x < this.W - 140) {
             sc.active = true;
-            sc.x = this.W + 40;
+            sc.x = this.W + 50;
             sc.y = this.groundY - sc.h;
             sc.vy = 0;
             sc.onGround = true;
-            // Play scooter horn
             this.sound.play('beep');
           }
         }
       } else {
-        // Move across the beach from right to left
-        // Moves at relative speed so it cruises dynamically
-        sc.x -= (this.speed * 0.85 + sc.speed * 0.25) * step;
-        sc.wheelRotation += step * 0.2;
-        sc.bobPhase += step * 0.15;
+        // Relaxed, enjoyable cruising pace
+        sc.x -= (this.speed * 0.75 + sc.speed * 0.25) * step;
+        sc.wheelRotation += step * 0.12;
+        sc.bobPhase += step * 0.08;
 
         // Scooter physics
-        const gravity = 0.75;
+        const gravity = 0.58;
         sc.vy += gravity * step;
         sc.y += sc.vy * step;
         if (sc.y >= this.groundY - sc.h) {
@@ -653,10 +669,10 @@ export class GameEngine {
         if (sc.onGround) {
           for (const o of this.obstacles) {
             const dist = o.x - (sc.x + sc.w);
-            if (dist > -10 && dist < 40) {
-              sc.vy = -12.5;
+            if (dist > -10 && dist < 45) {
+              sc.vy = -10.5;
               sc.onGround = false;
-              this.spawnSandDust(sc.x, this.groundY, 4);
+              this.spawnSandDust(sc.x, this.groundY, 3);
               break;
             }
           }
@@ -665,14 +681,14 @@ export class GameEngine {
         // Deactivate once exited off the left side
         if (sc.x + sc.w < -60) {
           sc.active = false;
-          // Random cooldown before next pass (16 - 28s)
-          sc.spawnCooldown = 16 + Math.random() * 12;
+          // Long relaxed cooldown between passes (28 - 45s)
+          sc.spawnCooldown = 28 + Math.random() * 18;
         }
       }
     }
   }
 
-  // ---- AI Chasers (EFOT & DADA) ----
+  // ---- AI Chasers (EFOT & DADA) Following from Farther Away ----
 
   private updateChasers(dt: number, step: number) {
     const isAnyOtherAttacking = this.chasers.some(
@@ -680,9 +696,9 @@ export class GameEngine {
     );
 
     for (const c of this.chasers) {
-      c.runFrame += step * 0.4;
+      c.runFrame += step * 0.28;
 
-      const gravity = 0.75;
+      const gravity = 0.58;
       c.vy += gravity * step;
       c.y += c.vy * step;
       if (c.y >= this.groundY - c.h) {
@@ -691,77 +707,86 @@ export class GameEngine {
         c.onGround = true;
       }
 
-      // Jump over obstacles
+      // Jump over obstacles smoothly
       if (c.onGround) {
         for (const o of this.obstacles) {
           const distToObstacle = o.x - (c.x + c.w);
-          if (distToObstacle > -10 && distToObstacle < 50) {
-            c.vy = -12.5;
+          if (distToObstacle > -10 && distToObstacle < 55) {
+            c.vy = -10.8;
             c.onGround = false;
-            this.spawnSandDust(c.x, this.groundY, 4);
+            this.spawnSandDust(c.x, this.groundY, 3);
             break;
           }
         }
       }
 
-      // Attack State Machine
+      // Attack State Machine — gentle, fair and telegraph-rich
       if (c.attackPhase === 'idle') {
         c.attackCooldown -= dt;
         c.lungeX = 0;
-        c.stickAngle = -0.6 + Math.sin(c.runFrame * 2) * 0.1;
-        c.x = c.baseX;
+        c.stickAngle = -0.6 + Math.sin(c.runFrame * 2) * 0.08;
 
-        if (c.attackCooldown <= 0 && !isAnyOtherAttacking && this.timeAlive > 4) {
+        // Smoothly maintain far following distance without snapping or teleporting
+        const targetX = c.baseX;
+        c.x += (targetX - c.x) * (step * 0.06);
+
+        // Attacks only trigger after 18s grace period, with mutual exclusion and long cooldowns
+        if (c.attackCooldown <= 0 && !isAnyOtherAttacking && this.timeAlive > 18) {
           c.attackPhase = 'windup';
-          c.phaseTimer = 0.75;
+          c.phaseTimer = 1.25; // Generous 1.25s unmistakable warning!
           this.sound.play('warning');
           this.burst(c.x + c.w / 2, c.y - 10, c.colorTheme.glow, 6);
         }
       } else if (c.attackPhase === 'windup') {
         c.phaseTimer -= dt;
-        const windupProgress = 1 - Math.max(0, c.phaseTimer / 0.75);
-        c.stickAngle = -0.6 - windupProgress * 1.4;
+        const windupProgress = 1 - Math.max(0, c.phaseTimer / 1.25);
+        c.stickAngle = -0.6 - windupProgress * 1.3;
 
-        const maxLunge = c.id === 'EFOT' ? 30 : 44;
+        // Smoothly glide forward into strike distance behind TM (at x=200)
+        // EFOT (baseX=70) surges forward by up to 80px (reaching x=150)
+        // DADA (baseX=-5) surges forward by up to 135px (reaching x=130)
+        const maxLunge = c.id === 'EFOT' ? 80 : 135;
         c.lungeX = windupProgress * maxLunge;
-        c.x = c.baseX + c.lungeX;
+        const targetX = c.baseX + c.lungeX;
+        c.x += (targetX - c.x) * (step * 0.1);
 
         if (c.phaseTimer <= 0) {
           c.attackPhase = 'strike';
-          c.phaseTimer = 0.22;
+          c.phaseTimer = 0.20; // Crisp, predictable swing
           this.sound.play('swing');
         }
       } else if (c.attackPhase === 'strike') {
         c.phaseTimer -= dt;
-        const strikeProgress = 1 - Math.max(0, c.phaseTimer / 0.22);
-        c.stickAngle = -2.0 + strikeProgress * 2.8;
+        const strikeProgress = 1 - Math.max(0, c.phaseTimer / 0.20);
+        c.stickAngle = -1.9 + strikeProgress * 2.7;
 
         const handX = c.x + c.w - 4;
         const handY = c.y + c.h * 0.55;
         const tipX = handX + Math.cos(c.stickAngle) * c.stickLength;
         const tipY = handY + Math.sin(c.stickAngle) * c.stickLength;
 
-        if (strikeProgress >= 0.2 && strikeProgress <= 0.8) {
+        // Active strike window
+        if (strikeProgress >= 0.25 && strikeProgress <= 0.75) {
           const stickLeft = Math.min(handX, tipX);
           const stickRight = Math.max(handX, tipX);
           const stickTop = Math.min(handY, tipY);
           const stickBottom = Math.max(handY, tipY);
 
           const p = this.player;
-          const playerLeft = p.x + 4;
-          const playerRight = p.x + p.w - 4;
-          const playerTop = p.y + 4;
+          const playerLeft = p.x + 6;
+          const playerRight = p.x + p.w - 6;
+          const playerTop = p.y + 6;
           const playerBottom = p.y + p.h;
 
           const horizontalHit = stickRight > playerLeft && stickLeft < playerRight;
           const verticalHit = stickBottom > playerTop && stickTop < playerBottom;
 
-          // FAIR DODGE: Jump completely over the sweeping stick
-          const isDodgingAirborne = playerBottom < this.groundY - 26;
+          // FAIR DODGE: Jump over the stick. If airborne, clean dodge!
+          const isDodgingAirborne = playerBottom < this.groundY - 20;
 
           if (horizontalHit && verticalHit && !isDodgingAirborne) {
             this.sound.play('whack');
-            this.burst(p.x + p.w / 2, p.y + p.h / 2, c.colorTheme.stickGlow, 24);
+            this.burst(p.x + p.w / 2, p.y + p.h / 2, c.colorTheme.stickGlow, 22);
             this.die();
             return;
           }
@@ -769,14 +794,16 @@ export class GameEngine {
 
         if (c.phaseTimer <= 0) {
           c.attackPhase = 'recovery';
-          c.phaseTimer = 0.5;
+          c.phaseTimer = 0.70; // Gentle retreat
         }
       } else if (c.attackPhase === 'recovery') {
         c.phaseTimer -= dt;
-        const recProgress = 1 - Math.max(0, c.phaseTimer / 0.5);
-        const maxLunge = c.id === 'EFOT' ? 30 : 44;
+        const recProgress = 1 - Math.max(0, c.phaseTimer / 0.70);
+        const maxLunge = c.id === 'EFOT' ? 80 : 135;
         c.lungeX = maxLunge * (1 - recProgress);
-        c.x = c.baseX + c.lungeX;
+
+        const targetX = c.baseX + c.lungeX;
+        c.x += (targetX - c.x) * (step * 0.08);
         c.stickAngle = 0.8 - recProgress * 1.4;
 
         if (c.phaseTimer <= 0) {
@@ -784,39 +811,52 @@ export class GameEngine {
           c.lungeX = 0;
           c.x = c.baseX;
           c.stickAngle = -0.6;
-          c.attackCooldown = 8.0 + Math.random() * 6.0;
+          // Long cooldown between attacks (20 to 32 seconds!)
+          c.attackCooldown = 20.0 + Math.random() * 12.0;
         }
       }
     }
   }
 
-  // ---- Collisions ----
+  // ---- Collisions with forgiving bounds ----
 
   private checkCollisions() {
     const p = this.player;
-    const pad = 6;
+    const pad = 8; // Forgiving player padding
     const px = p.x + pad;
     const py = p.y + pad;
     const pw = p.w - pad * 2;
     const ph = p.h - pad * 2;
 
     for (const o of this.obstacles) {
-      let ox = o.x + 4;
-      const oy = o.y + 4;
-      let ow = o.w - 8;
-      const oh = o.h - 8;
+      if (o.type === 'beachball') {
+        // Circular hitbox with cushion
+        const r = o.w / 2 - 3;
+        const cx = o.x + o.w / 2;
+        const cy = o.y + o.h / 2;
+        const closestX = Math.max(px, Math.min(cx, px + pw));
+        const closestY = Math.max(py, Math.min(cy, py + ph));
+        const dx = cx - closestX;
+        const dy = cy - closestY;
+        if (dx * dx + dy * dy < r * r) {
+          this.die();
+          return;
+        }
+      } else {
+        let ox = o.x + 5;
+        const oy = o.y + 4;
+        let ow = o.w - 10;
+        const oh = o.h - 6;
 
-      if (o.type === 'spike') {
-        ox = o.x + 8;
-        ow = o.w - 16;
-      } else if (o.type === 'umbrella') {
-        ox = o.x + 10;
-        ow = o.w - 20;
-      }
+        if (o.type === 'umbrella') {
+          ox = o.x + 12;
+          ow = o.w - 24;
+        }
 
-      if (px < ox + ow && px + pw > ox && py < oy + oh && py + ph > oy) {
-        this.die();
-        return;
+        if (px < ox + ow && px + pw > ox && py < oy + oh && py + ph > oy) {
+          this.die();
+          return;
+        }
       }
     }
 
@@ -827,22 +867,22 @@ export class GameEngine {
       const cy = p.y + p.h / 2;
       const dx = cx - c.x;
       const dy = cy - c.y;
-      if (dx * dx + dy * dy < (c.r + 22) * (c.r + 22)) {
+      if (dx * dx + dy * dy < (c.r + 24) * (c.r + 24)) {
         c.collected = true;
         this.coinCount += 1;
         this.score += 5;
-        this.distance += 30;
+        this.distance += 25;
         this.sound.play('coin');
-        this.burst(c.x, c.y, 'rgba(255,210,80,', 12);
+        this.burst(c.x, c.y, 'rgba(255,210,80,', 10);
       }
     }
   }
 
   private die() {
     this.sound.play('crash');
-    this.shake = 14;
+    this.shake = 12;
     this.flash = 1;
-    this.burst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, 'rgba(255,70,90,', 26);
+    this.burst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, 'rgba(255,70,90,', 24);
     const finalScore = this.score;
     const finalCoins = this.coinCount;
     if (finalScore > this.best) {
@@ -937,30 +977,25 @@ export class GameEngine {
   // ---- Beach Background & Day Cycle Drawing ----
 
   private drawSky(ctx: CanvasRenderingContext2D, t: number) {
-    // Determine sky colors by phase
     let skyTop = '#1e6fb6';
     let skyMid = '#48a6e8';
     let skyBot = '#9ce0ff';
 
     if (t < 0.22) {
-      // Sunrise: deep purple -> vibrant dawn gold
       const p = t / 0.22;
       skyTop = lerpColor('#1b1233', '#1e6fb6', p);
       skyMid = lerpColor('#c85060', '#48a6e8', p);
       skyBot = lerpColor('#ff8e53', '#9ce0ff', p);
     } else if (t < 0.52) {
-      // Daytime: radiant blue tropical sky
       skyTop = '#1864ab';
       skyMid = '#339af0';
       skyBot = '#a5d8ff';
     } else if (t < 0.78) {
-      // Sunset: fiery orange, magenta, violet
       const p = (t - 0.52) / 0.26;
       skyTop = lerpColor('#1864ab', '#2b0938', p);
       skyMid = lerpColor('#339af0', '#c2255c', p);
       skyBot = lerpColor('#a5d8ff', '#f76707', p);
     } else {
-      // Night: midnight sapphire, starry sky
       const p = (t - 0.78) / 0.22;
       skyTop = lerpColor('#2b0938', '#070b19', p);
       skyMid = lerpColor('#141529', '#0d1326', p);
@@ -991,26 +1026,22 @@ export class GameEngine {
     const horizonY = this.groundY - 80;
 
     if (t < 0.78) {
-      // Sun is up: rises at left, peaks at mid, sets at right
       let sunX: number;
       let sunY: number;
       let sunColor = 'rgba(255, 240, 160, 0.95)';
       let glowColor = 'rgba(255, 200, 80, 0.35)';
 
       if (t < 0.22) {
-        // Rising
         const p = t / 0.22;
         sunX = 140 + p * 200;
         sunY = horizonY - p * 110;
         sunColor = 'rgba(255, 170, 70, 0.95)';
         glowColor = 'rgba(255, 120, 50, 0.45)';
       } else if (t < 0.52) {
-        // High noon
         const p = (t - 0.22) / 0.30;
         sunX = 340 + p * 240;
         sunY = horizonY - 110 + Math.sin(p * Math.PI) * -15;
       } else {
-        // Setting
         const p = (t - 0.52) / 0.26;
         sunX = 580 + p * 200;
         sunY = horizonY - 110 + p * 110;
@@ -1033,7 +1064,7 @@ export class GameEngine {
       ctx.arc(sunX, sunY, 20, 0, Math.PI * 2);
       ctx.fill();
 
-      // Sun reflection beam down into the sea
+      // Sun reflection beam
       ctx.save();
       const refGrad = ctx.createLinearGradient(sunX, horizonY, sunX, this.groundY - 10);
       refGrad.addColorStop(0, glowColor);
@@ -1042,12 +1073,10 @@ export class GameEngine {
       ctx.fillRect(sunX - 25, horizonY, 50, this.groundY - horizonY);
       ctx.restore();
     } else {
-      // Moon at night
       const p = (t - 0.78) / 0.22;
       const moonX = 640 - p * 300;
       const moonY = 65 + Math.sin(p * Math.PI) * -10;
 
-      // Moon halo
       const mg = ctx.createRadialGradient(moonX, moonY, 4, moonX, moonY, 45);
       mg.addColorStop(0, 'rgba(210, 235, 255, 0.4)');
       mg.addColorStop(1, 'rgba(255,255,255,0)');
@@ -1056,7 +1085,6 @@ export class GameEngine {
       ctx.arc(moonX, moonY, 45, 0, Math.PI * 2);
       ctx.fill();
 
-      // Crescent moon
       ctx.fillStyle = '#f0f9ff';
       ctx.beginPath();
       ctx.arc(moonX, moonY, 15, 0, Math.PI * 2);
@@ -1135,14 +1163,12 @@ export class GameEngine {
       crestColor = '#2a4d69';
     }
 
-    // Sea gradient
     const sg = ctx.createLinearGradient(0, horizonY, 0, horizonY + seaHeight);
     sg.addColorStop(0, deepSea);
     sg.addColorStop(1, midSea);
     ctx.fillStyle = sg;
     ctx.fillRect(0, horizonY, this.W, seaHeight);
 
-    // Animated ocean wave layers
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = crestColor;
     for (let layer = 0; layer < 3; layer++) {
@@ -1184,7 +1210,6 @@ export class GameEngine {
       foamColor = 'rgba(180, 210, 240, 0.5)';
     }
 
-    // Gentle wave foam wash on the shore
     ctx.fillStyle = foamColor;
     const wash = Math.sin(this.waveOffset * 0.05) * 5;
     ctx.beginPath();
@@ -1198,14 +1223,12 @@ export class GameEngine {
     ctx.closePath();
     ctx.fill();
 
-    // Sand ground fill
     const sandGrad = ctx.createLinearGradient(0, this.groundY - 8, 0, this.H);
     sandGrad.addColorStop(0, sandTop);
     sandGrad.addColorStop(1, sandBottom);
     ctx.fillStyle = sandGrad;
     ctx.fillRect(0, this.groundY, this.W, this.H - this.groundY);
 
-    // Warm shoreline contour edge
     ctx.strokeStyle = '#fff3bf';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -1213,7 +1236,6 @@ export class GameEngine {
     ctx.lineTo(this.W, this.groundY);
     ctx.stroke();
 
-    // Sand shells
     for (const sh of this.shells) {
       ctx.fillStyle = sh.color;
       ctx.beginPath();
@@ -1240,7 +1262,6 @@ export class GameEngine {
       const px = (p.x - this.cloudOffset * 0.3) % (this.W + 200);
       const x = px < -100 ? px + this.W + 300 : px;
 
-      // Curved trunk
       ctx.strokeStyle = trunkColor;
       ctx.lineWidth = 4.5;
       ctx.beginPath();
@@ -1248,7 +1269,6 @@ export class GameEngine {
       ctx.quadraticCurveTo(x + 12, palmY - p.height * 0.5, x + 20, palmY - p.height);
       ctx.stroke();
 
-      // Fronds
       const tipX = x + 20;
       const tipY = palmY - p.height;
       const sway = Math.sin(this.waveOffset * 0.04 + x) * 4;
@@ -1268,7 +1288,6 @@ export class GameEngine {
         ctx.stroke();
       }
 
-      // Coconuts
       ctx.fillStyle = '#4a2810';
       ctx.beginPath();
       ctx.arc(tipX - 2, tipY + 2, 3.5, 0, Math.PI * 2);
@@ -1285,29 +1304,25 @@ export class GameEngine {
       const gy = o.y + o.h;
 
       if (o.type === 'driftwood') {
-        // Weathered beach log
         ctx.fillStyle = '#8b5a2b';
         ctx.strokeStyle = '#5c3a21';
         ctx.lineWidth = 1.5;
-        this.roundRect(ctx, o.x, gy - o.h, o.w, o.h, 6);
+        this.roundRect(ctx, o.x, gy - o.h, o.w, o.h, 5);
         ctx.fill();
         ctx.stroke();
 
-        // Branch stub
         ctx.fillStyle = '#6e431f';
-        ctx.fillRect(o.x + o.w * 0.6, gy - o.h - 5, 8, 6);
+        ctx.fillRect(o.x + o.w * 0.6, gy - o.h - 4, 7, 5);
 
-        // Wood rings/stripes
         ctx.strokeStyle = '#a06a38';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(o.x + 8, gy - o.h + 6);
-        ctx.lineTo(o.x + o.w - 8, gy - o.h + 6);
-        ctx.moveTo(o.x + 12, gy - 8);
-        ctx.lineTo(o.x + o.w - 12, gy - 8);
+        ctx.moveTo(o.x + 6, gy - o.h + 5);
+        ctx.lineTo(o.x + o.w - 6, gy - o.h + 5);
+        ctx.moveTo(o.x + 10, gy - 6);
+        ctx.lineTo(o.x + o.w - 10, gy - 6);
         ctx.stroke();
       } else if (o.type === 'rock') {
-        // Smooth granite rocks
         const grad = ctx.createLinearGradient(o.x, o.y, o.x, gy);
         grad.addColorStop(0, '#94a3b8');
         grad.addColorStop(1, '#475569');
@@ -1315,16 +1330,14 @@ export class GameEngine {
         ctx.beginPath();
         ctx.moveTo(o.x + 4, gy);
         ctx.lineTo(o.x + o.w * 0.3, o.y);
-        ctx.lineTo(o.x + o.w * 0.7, o.y + 4);
+        ctx.lineTo(o.x + o.w * 0.7, o.y + 3);
         ctx.lineTo(o.x + o.w - 4, gy);
         ctx.closePath();
         ctx.fill();
 
-        // Highlight
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.fillRect(o.x + o.w * 0.35, o.y + 3, o.w * 0.3, 4);
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.fillRect(o.x + o.w * 0.35, o.y + 3, o.w * 0.3, 3);
       } else if (o.type === 'beachball') {
-        // Striped beach ball with roll rotation
         const r = o.w / 2;
         const cx = o.x + r;
         const cy = o.y + r;
@@ -1333,7 +1346,6 @@ export class GameEngine {
         ctx.translate(cx, cy);
         ctx.rotate(rot);
 
-        // 4 color segments: red, yellow, cyan, white
         const colors = ['#ef4444', '#eab308', '#06b6d4', '#f8fafc'];
         for (let i = 0; i < 4; i++) {
           ctx.fillStyle = colors[i];
@@ -1344,15 +1356,13 @@ export class GameEngine {
           ctx.fill();
         }
 
-        // Center hub circle
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
         ctx.stroke();
       } else if (o.type === 'sandmound') {
-        // Sandy mound with starfish / mini flag
         const grad = ctx.createLinearGradient(o.x, o.y, o.x, gy);
         grad.addColorStop(0, '#fde047');
         grad.addColorStop(1, '#ca8a04');
@@ -1363,31 +1373,27 @@ export class GameEngine {
         ctx.closePath();
         ctx.fill();
 
-        // Mini red beach flag
         ctx.strokeStyle = '#92400e';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(o.x + o.w * 0.5, gy - o.h + 2);
-        ctx.lineTo(o.x + o.w * 0.5, gy - o.h - 12);
+        ctx.lineTo(o.x + o.w * 0.5, gy - o.h - 10);
         ctx.stroke();
         ctx.fillStyle = '#ef4444';
         ctx.beginPath();
-        ctx.moveTo(o.x + o.w * 0.5, gy - o.h - 12);
-        ctx.lineTo(o.x + o.w * 0.5 + 10, gy - o.h - 7);
+        ctx.moveTo(o.x + o.w * 0.5, gy - o.h - 10);
+        ctx.lineTo(o.x + o.w * 0.5 + 9, gy - o.h - 6);
         ctx.lineTo(o.x + o.w * 0.5, gy - o.h - 2);
         ctx.closePath();
         ctx.fill();
       } else if (o.type === 'umbrella') {
-        // Beach umbrella parasol (tall)
-        // Pole
         ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 3.5;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(o.x + o.w * 0.5, gy);
         ctx.lineTo(o.x + o.w * 0.5, o.y + 12);
         ctx.stroke();
 
-        // Canopy stripes
         const cx = o.x + o.w * 0.5;
         const cy = o.y + 14;
         const colors = ['#f43f5e', '#38bdf8', '#fbbf24', '#f43f5e'];
@@ -1395,14 +1401,13 @@ export class GameEngine {
           ctx.fillStyle = colors[i];
           const span = (o.w * 0.5) / 2;
           ctx.beginPath();
-          ctx.moveTo(cx, cy - 12);
+          ctx.moveTo(cx, cy - 10);
           ctx.lineTo(cx - o.w * 0.5 + i * span, cy);
           ctx.lineTo(cx - o.w * 0.5 + (i + 1) * span, cy);
           ctx.closePath();
           ctx.fill();
         }
       } else {
-        // Fallback for legacy blocks
         ctx.fillStyle = '#f59e0b';
         this.roundRect(ctx, o.x, o.y, o.w, o.h, 6);
         ctx.fill();
@@ -1416,10 +1421,10 @@ export class GameEngine {
 
   private drawScooter(ctx: CanvasRenderingContext2D, sc: ScooterRider) {
     ctx.save();
-    const bob = Math.sin(sc.bobPhase) * 1.5;
+    const bob = Math.sin(sc.bobPhase) * 1.2;
     ctx.translate(sc.x, sc.y + bob);
 
-    // Scooter Deck and Frame
+    // Scooter Deck
     ctx.fillStyle = sc.colorTheme.scooter;
     this.roundRect(ctx, 4, sc.h - 12, sc.w - 12, 5, 2);
     ctx.fill();
@@ -1432,46 +1437,40 @@ export class GameEngine {
     ctx.lineTo(6, sc.h - 32);
     ctx.stroke();
 
-    // Handlebar grip
     ctx.fillStyle = '#1e293b';
     this.roundRect(ctx, 2, sc.h - 34, 10, 4, 1.5);
     ctx.fill();
 
-    // Headlight with warm glow
+    // Headlight
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = '#fef08a';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.arc(4, sc.h - 28, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Front Wheel
+    // Wheels
     this.drawWheel(ctx, 8, sc.h - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
-    // Rear Wheel
     this.drawWheel(ctx, sc.w - 12, sc.h - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
 
     // Rider Character
     const rx = sc.w * 0.45;
     const ry = sc.h - 34;
 
-    // Body / Shirt
     ctx.fillStyle = sc.colorTheme.shirt;
     this.roundRect(ctx, rx - 6, ry, 13, 16, 4);
     ctx.fill();
 
-    // Head / Helmet
     ctx.fillStyle = sc.colorTheme.rider;
     ctx.beginPath();
     ctx.arc(rx, ry - 6, 7, 0, Math.PI * 2);
     ctx.fill();
 
-    // Sunglasses / Visor
     ctx.fillStyle = '#0f172a';
     this.roundRect(ctx, rx - 7, ry - 7, 7, 4, 1);
     ctx.fill();
 
-    // Arms reaching to handlebar
     ctx.strokeStyle = sc.colorTheme.rider;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1481,7 +1480,6 @@ export class GameEngine {
 
     ctx.restore();
 
-    // Exact name label attached above scooter rider
     this.drawNameLabel(
       ctx,
       sc.name,
@@ -1504,19 +1502,16 @@ export class GameEngine {
     ctx.translate(x, y);
     ctx.rotate(rot);
 
-    // Tire
     ctx.fillStyle = '#1e293b';
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Rim
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Spokes
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1612,14 +1607,14 @@ export class GameEngine {
 
     // Legs (running)
     ctx.fillStyle = '#0c8a0c';
-    const swing = Math.sin(p.runFrame * Math.PI) * (p.onGround ? 6 : 0);
+    const swing = Math.sin(p.runFrame * Math.PI) * (p.onGround ? 5 : 0);
     this.roundRect(ctx, 8, p.h - 10, 9, 12 + swing, 3);
     ctx.fill();
     this.roundRect(ctx, p.w - 17, p.h - 10, 9, 12 - swing, 3);
     ctx.fill();
 
     // Arms
-    const armSwing = Math.sin(p.runFrame * Math.PI + Math.PI) * (p.onGround ? 5 : 0);
+    const armSwing = Math.sin(p.runFrame * Math.PI + Math.PI) * (p.onGround ? 4 : 0);
     this.roundRect(ctx, -3, 16, 7, 14 + armSwing, 3);
     ctx.fill();
     this.roundRect(ctx, p.w - 4, 16, 7, 14 - armSwing, 3);
@@ -1655,14 +1650,14 @@ export class GameEngine {
 
     // Legs
     ctx.fillStyle = c.colorTheme.secondary;
-    const swing = Math.sin(c.runFrame * Math.PI) * (c.onGround ? 6 : 0);
+    const swing = Math.sin(c.runFrame * Math.PI) * (c.onGround ? 5 : 0);
     this.roundRect(ctx, 8, c.h - 10, 8, 12 + swing, 3);
     ctx.fill();
     this.roundRect(ctx, c.w - 16, c.h - 10, 8, 12 - swing, 3);
     ctx.fill();
 
     // Arms & Stick
-    const armSwing = Math.sin(c.runFrame * Math.PI + Math.PI) * (c.onGround ? 5 : 0);
+    const armSwing = Math.sin(c.runFrame * Math.PI + Math.PI) * (c.onGround ? 4 : 0);
     this.roundRect(ctx, -2, 16, 6, 13 - armSwing, 3);
     ctx.fill();
 
@@ -1727,12 +1722,12 @@ export class GameEngine {
 
   private drawCoins(ctx: CanvasRenderingContext2D) {
     for (const c of this.coins) {
-      const wobble = Math.sin(c.phase) * 3;
+      const wobble = Math.sin(c.phase) * 2.5;
       const sx = Math.abs(Math.cos(c.phase * 1.5));
       ctx.save();
       ctx.translate(c.x, c.y + wobble);
       ctx.shadowColor = '#ffd633';
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 10;
       ctx.fillStyle = '#ffcc00';
       ctx.beginPath();
       ctx.ellipse(0, 0, c.r * (0.4 + sx * 0.6), c.r, 0, 0, Math.PI * 2);

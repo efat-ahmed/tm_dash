@@ -66,6 +66,14 @@ export default function TMDash() {
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
 
+    let ro: ResizeObserver | null = null;
+    if (wrapRef.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        engine.resize();
+      });
+      ro.observe(wrapRef.current);
+    }
+
     // Initial render loop for animated idle background on start screen
     requestAnimationFrame(() => {
       engine.resize();
@@ -75,20 +83,20 @@ export default function TMDash() {
     return () => {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
+      ro?.disconnect();
       engine.destroy();
     };
   }, []);
 
-  // Update time of day periodically from engine
+  // Update time of day periodically from engine across all states
   useEffect(() => {
-    if (state !== 'running') return;
     const timer = setInterval(() => {
       if (engineRef.current) {
         setTimeOfDay(engineRef.current.getTimeOfDayName());
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [state]);
+  }, []);
 
   const handleStart = useCallback(() => {
     engineRef.current?.resumeAudio();
