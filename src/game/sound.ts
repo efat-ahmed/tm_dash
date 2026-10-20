@@ -1,4 +1,4 @@
-type SoundName = 'jump' | 'coin' | 'crash' | 'click' | 'start';
+type SoundName = 'jump' | 'coin' | 'crash' | 'click' | 'start' | 'warning' | 'swing' | 'whack';
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
@@ -89,6 +89,49 @@ export class SoundManager {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
       osc.start(now);
       osc.stop(now + 0.36);
+    } else if (name === 'warning') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.linearRampToValueAtTime(1100, now + 0.08);
+      osc.frequency.setValueAtTime(700, now + 0.1);
+      osc.frequency.linearRampToValueAtTime(1300, now + 0.18);
+      g.gain.setValueAtTime(0.25, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc.start(now);
+      osc.stop(now + 0.24);
+    } else if (name === 'swing') {
+      // Whoosh sound: rapidly falling tone through bandpass
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(500, now);
+      osc.frequency.exponentialRampToValueAtTime(90, now + 0.22);
+      g.gain.setValueAtTime(0.5, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } else if (name === 'whack') {
+      // Crisp strike impact
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.2));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const strikeGain = ctx.createGain();
+      strikeGain.gain.setValueAtTime(0.9, now);
+      strikeGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      src.connect(strikeGain);
+      strikeGain.connect(out);
+      src.start(now);
+
+      // Low punch thump
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
+      g.gain.setValueAtTime(0.6, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.start(now);
+      osc.stop(now + 0.19);
     }
   }
 }

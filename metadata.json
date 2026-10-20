@@ -1,0 +1,7 @@
+{
+  "name": "TM Dash — Neon Endless Runner",
+  "description": "Run, jump, and collect coins in this neon arcade endless runner.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

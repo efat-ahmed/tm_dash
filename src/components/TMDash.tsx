@@ -25,6 +25,11 @@ export default function TMDash() {
   const [totalCoins, setTotalCoins] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
   const [isNewBest, setIsNewBest] = useState(false);
+  const bestRef = useRef(0);
+
+  useEffect(() => {
+    bestRef.current = best;
+  }, [best]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -35,9 +40,9 @@ export default function TMDash() {
         setCoins(c);
       },
       onGameOver: (_s, _c, b) => {
+        setIsNewBest(_s > bestRef.current && _s > 0);
         setBest(b);
         setTotalCoins(engine.getTotalCoins());
-        setIsNewBest(_s >= b && _s > 0);
       },
       onReady: () => {
         setBest(engine.getBest());
@@ -65,11 +70,13 @@ export default function TMDash() {
   }, []);
 
   const handleStart = useCallback(() => {
+    engineRef.current?.resumeAudio();
     engineRef.current?.start();
     setIsNewBest(false);
   }, []);
 
   const handleRestart = useCallback(() => {
+    engineRef.current?.resumeAudio();
     engineRef.current?.restart();
     setIsNewBest(false);
   }, []);
@@ -79,6 +86,7 @@ export default function TMDash() {
   }, []);
 
   const handleJump = useCallback(() => {
+    engineRef.current?.resumeAudio();
     if (state === 'ready') {
       handleStart();
       return;
@@ -115,20 +123,26 @@ export default function TMDash() {
     return () => window.removeEventListener('keydown', onKey);
   }, [state, handleJump, handlePause, handleStart, handleRestart]);
 
-  // prevent touch scrolling / pinch over the game
+  // prevent touch scrolling / pinch over the game and trigger instant touch jump
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const prevent = (e: TouchEvent) => {
+    const onTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button')) return;
+      e.preventDefault();
+      handleJump();
+    };
+    const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
     };
-    el.addEventListener('touchstart', prevent, { passive: false });
-    el.addEventListener('touchmove', prevent, { passive: false });
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => {
-      el.removeEventListener('touchstart', prevent);
-      el.removeEventListener('touchmove', prevent);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
     };
-  }, []);
+  }, [handleJump]);
 
   const fmt = (n: number) => n.toLocaleString();
 
@@ -161,6 +175,13 @@ export default function TMDash() {
             <Coins className="w-4 h-4 text-amber-400" />
             <span className="font-bold tabular-nums">{coins}</span>
           </span>
+          {/* Chasers indicator badge */}
+          <div className="hidden sm:flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 font-sans">
+            <span className="text-white/40 text-[10px] uppercase tracking-wider">Chasers:</span>
+            <span className="text-orange-400 font-semibold drop-shadow-[0_0_6px_rgba(251,146,60,0.6)]">EFOT</span>
+            <span className="text-white/20">&bull;</span>
+            <span className="text-fuchsia-400 font-semibold drop-shadow-[0_0_6px_rgba(232,121,249,0.6)]">DADA</span>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-fuchsia-300">
@@ -202,7 +223,12 @@ export default function TMDash() {
       {/* Game stage */}
       <div
         ref={wrapRef}
-        className="relative z-10 w-full max-w-[900px] aspect-[900/360] rounded-2xl overflow-hidden border border-cyan-500/30 shadow-[0_0_40px_rgba(34,211,238,0.15)] touch-none bg-[#070b1a]"
+        onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          handleJump();
+        }}
+        className="relative z-10 w-full max-w-[900px] aspect-[900/360] rounded-2xl overflow-hidden border border-cyan-500/30 shadow-[0_0_40px_rgba(34,211,238,0.15)] touch-none bg-[#070b1a] cursor-pointer"
       >
         <canvas ref={canvasRef} className="block w-full h-full" />
 
@@ -214,14 +240,19 @@ export default function TMDash() {
                 <span className="text-cyan-400 drop-shadow-[0_0_20px_rgba(34,211,238,0.9)]">TM</span>{' '}
                 <span className="text-fuchsia-400 drop-shadow-[0_0_20px_rgba(232,121,249,0.9)]">DASH</span>
               </div>
-              <p className="text-white/70 mb-5 text-sm max-w-xs mx-auto">
-                Run, jump and grab coins. Survive as long as you can — the world speeds up the further you go.
+              <p className="text-white/80 mb-3 text-xs sm:text-sm max-w-sm mx-auto leading-relaxed">
+                Run as <span className="text-cyan-300 font-bold">TM</span> while dodging obstacles and escaping <span className="text-orange-400 font-bold">EFOT</span> & <span className="text-fuchsia-400 font-bold">DADA</span>!
               </p>
-              <NeonButton onClick={handleStart} variant="cyan">
-                <Play className="w-5 h-5" /> PLAY
-              </NeonButton>
-              <div className="mt-5 text-xs text-white/50 font-mono space-y-1">
-                <p>SPACE / ↑ / TAP to jump (double-jump in air)</p>
+              <div className="mb-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-400/30 text-amber-300 text-xs font-mono">
+                <span>⚠️ When you see <strong className="text-white">! SWING</strong>, jump to dodge the stick!</span>
+              </div>
+              <div>
+                <NeonButton onClick={handleStart} variant="cyan">
+                  <Play className="w-5 h-5" /> PLAY
+                </NeonButton>
+              </div>
+              <div className="mt-4 text-xs text-white/50 font-mono space-y-1">
+                <p>SPACE / ↑ / TAP ANYWHERE to jump (double-jump in air)</p>
                 <p>P or ESC to pause</p>
               </div>
             </div>
@@ -287,14 +318,15 @@ export default function TMDash() {
           e.preventDefault();
           handleJump();
         }}
-        className="md:hidden mt-3 z-10 w-20 h-20 rounded-full bg-cyan-500/20 border-2 border-cyan-400/60 text-cyan-200 flex items-center justify-center active:bg-cyan-500/40 active:scale-95 transition shadow-[0_0_30px_rgba(34,211,238,0.4)]"
+        className="md:hidden mt-3 z-10 w-20 h-20 rounded-full bg-cyan-500/20 border-2 border-cyan-400/60 text-cyan-200 flex flex-col items-center justify-center active:bg-cyan-500/40 active:scale-95 transition shadow-[0_0_30px_rgba(34,211,238,0.4)]"
         aria-label="Jump"
       >
-        <ArrowUp className="w-9 h-9" />
+        <ArrowUp className="w-8 h-8" />
+        <span className="text-[10px] font-bold tracking-wider -mt-1 font-mono">JUMP</span>
       </button>
 
       <p className="hidden md:block relative z-10 mt-3 text-xs text-white/40 font-mono">
-        Press SPACE or click the game to jump
+        Press SPACE or click anywhere on the game to jump (double-jump to dodge swings)
       </p>
 
       <div className="relative z-10 mt-2 text-[11px] text-white/30 font-mono">

@@ -1,4 +1,4 @@
-import type { Coin, EngineCallbacks, GameState, Obstacle, Particle, Player } from './types';
+import type { Chaser, Coin, EngineCallbacks, GameState, Obstacle, Particle, Player } from './types';
 import { SoundManager } from './sound';
 
 const BEST_KEY = 'tmdash_best';
@@ -11,6 +11,7 @@ export class GameEngine {
   private sound: SoundManager;
 
   private raf = 0;
+  private idleRaf = 0;
   private lastTime = 0;
   private accumulator = 0;
   private state: GameState = 'ready';
@@ -26,6 +27,7 @@ export class GameEngine {
   private dpr = 1;
 
   private player: Player;
+  private chasers: Chaser[] = [];
   private obstacles: Obstacle[] = [];
   private coins: Coin[] = [];
   private particles: Particle[] = [];
@@ -74,12 +76,18 @@ export class GameEngine {
       runFrame: 0,
     };
 
+    this.chasers = this.initChasers();
     this.resize();
   }
 
   // ---- public API ----
 
+  resumeAudio() {
+    this.sound.resume();
+  }
+
   start() {
+    cancelAnimationFrame(this.idleRaf);
     this.reset();
     this.setState('running');
     this.sound.resume();
@@ -90,14 +98,19 @@ export class GameEngine {
   }
 
   idleRender() {
-    // animate the background slowly while on the start screen
+    // animate the background and characters slowly while on the start screen
+    cancelAnimationFrame(this.idleRaf);
     if (this.state !== 'ready') return;
     this.bgOffset = (this.bgOffset + 0.6) % 300;
     this.starOffset = (this.starOffset + 0.15) % 900;
     this.gridOffset = (this.gridOffset + 2) % 60;
+    this.player.runFrame += 0.15;
+    for (const c of this.chasers) {
+      c.runFrame += 0.15;
+    }
     this.render();
     if (this.state === 'ready') {
-      requestAnimationFrame(() => this.idleRender());
+      this.idleRaf = requestAnimationFrame(() => this.idleRender());
     }
   }
 
@@ -146,6 +159,7 @@ export class GameEngine {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.idleRaf);
   }
 
   resize() {
@@ -167,9 +181,72 @@ export class GameEngine {
     this.scale = Math.min(sx, sy);
     this.offsetX = (cw - this.W * this.scale) / 2;
     this.offsetY = (ch - this.H * this.scale) / 2;
+
+    if (this.state !== 'running') {
+      this.render();
+    }
   }
 
   // ---- internal ----
+
+  private initChasers(): Chaser[] {
+    return [
+      {
+        id: 'EFOT',
+        name: 'EFOT',
+        baseX: 62,
+        x: 62,
+        y: this.groundY - 46,
+        w: 36,
+        h: 46,
+        vy: 0,
+        onGround: true,
+        runFrame: 0,
+        colorTheme: {
+          primary: '#f97316',
+          secondary: '#c2410c',
+          visor: '#fef08a',
+          glow: '#ea580c',
+          labelBg: '#431407',
+          stickColor: '#fb923c',
+          stickGlow: '#f97316',
+        },
+        attackPhase: 'idle',
+        phaseTimer: 0,
+        attackCooldown: 6.0,
+        stickAngle: -0.6,
+        stickLength: 46,
+        lungeX: 0,
+      },
+      {
+        id: 'DADA',
+        name: 'DADA',
+        baseX: 14,
+        x: 14,
+        y: this.groundY - 46,
+        w: 36,
+        h: 46,
+        vy: 0,
+        onGround: true,
+        runFrame: 0.5,
+        colorTheme: {
+          primary: '#d946ef',
+          secondary: '#9333ea',
+          visor: '#f5d0fe',
+          glow: '#c026d3',
+          labelBg: '#3b0764',
+          stickColor: '#f43f5e',
+          stickGlow: '#fb7185',
+        },
+        attackPhase: 'idle',
+        phaseTimer: 0,
+        attackCooldown: 12.0,
+        stickAngle: -0.6,
+        stickLength: 46,
+        lungeX: 0,
+      },
+    ];
+  }
 
   private setState(s: GameState) {
     this.state = s;
@@ -196,6 +273,7 @@ export class GameEngine {
     this.player.vy = 0;
     this.player.onGround = true;
     this.player.jumpsLeft = 2;
+    this.chasers = this.initChasers();
   }
 
   private loop = (t: number) => {
@@ -278,6 +356,10 @@ export class GameEngine {
     }
     this.particles = this.particles.filter((p) => p.life > 0);
 
+    // update AI chasers (EFOT and DADA)
+    this.updateChasers(dt, step);
+    if (this.state !== 'running') return;
+
     // collisions
     this.checkCollisions();
 
@@ -288,6 +370,141 @@ export class GameEngine {
     // running dust
     if (this.player.onGround && Math.random() < 0.08 * step) {
       this.spawnDust(this.player.x, this.groundY, 1);
+    }
+  }
+
+  private updateChasers(dt: number, step: number) {
+    const isAnyOtherAttacking = this.chasers.some(
+      (c) => c.attackPhase === 'windup' || c.attackPhase === 'strike'
+    );
+
+    for (const c of this.chasers) {
+      // 1. Run animation
+      c.runFrame += step * 0.4;
+
+      // 2. Chaser physics
+      const gravity = 0.75;
+      c.vy += gravity * step;
+      c.y += c.vy * step;
+      if (c.y >= this.groundY - c.h) {
+        c.y = this.groundY - c.h;
+        c.vy = 0;
+        c.onGround = true;
+      }
+
+      // 3. AI Obstacle auto-jump: detect obstacles approaching the chaser
+      if (c.onGround) {
+        for (const o of this.obstacles) {
+          const distToObstacle = o.x - (c.x + c.w);
+          if (distToObstacle > -10 && distToObstacle < 50) {
+            c.vy = -12.5;
+            c.onGround = false;
+            this.spawnDust(c.x, this.groundY, 4);
+            break;
+          }
+        }
+      }
+
+      // 4. Attack State Machine
+      if (c.attackPhase === 'idle') {
+        c.attackCooldown -= dt;
+        c.lungeX = 0;
+        c.stickAngle = -0.6 + Math.sin(c.runFrame * 2) * 0.1;
+        c.x = c.baseX;
+
+        // Trigger attack if cooldown expired and not conflicting, with initial 4s grace
+        if (c.attackCooldown <= 0 && !isAnyOtherAttacking && this.timeAlive > 4) {
+          c.attackPhase = 'windup';
+          c.phaseTimer = 0.75; // 0.75s visual and audio telegraph
+          this.sound.play('warning');
+          this.burst(c.x + c.w / 2, c.y - 10, c.colorTheme.glow, 6);
+        }
+      } else if (c.attackPhase === 'windup') {
+        c.phaseTimer -= dt;
+        // Raise stick back in anticipation: rotate to -2.0 radians (~ -115 deg)
+        const windupProgress = 1 - Math.max(0, c.phaseTimer / 0.75);
+        c.stickAngle = -0.6 - windupProgress * 1.4;
+
+        // Lunge forward closer to the player:
+        // EFOT surges from 62 -> 92 (closer to player at 120)
+        // DADA surges from 14 -> 58
+        const maxLunge = c.id === 'EFOT' ? 30 : 44;
+        c.lungeX = windupProgress * maxLunge;
+        c.x = c.baseX + c.lungeX;
+
+        if (c.phaseTimer <= 0) {
+          c.attackPhase = 'strike';
+          c.phaseTimer = 0.22; // 0.22s strike swing
+          this.sound.play('swing');
+        }
+      } else if (c.attackPhase === 'strike') {
+        c.phaseTimer -= dt;
+        const strikeProgress = 1 - Math.max(0, c.phaseTimer / 0.22);
+        // Stick swings in a rapid downward/forward arc: from -2.0 down to +0.8 radians
+        c.stickAngle = -2.0 + strikeProgress * 2.8;
+
+        // Hand position:
+        const handX = c.x + c.w - 4;
+        const handY = c.y + c.h * 0.55;
+        const tipX = handX + Math.cos(c.stickAngle) * c.stickLength;
+        const tipY = handY + Math.sin(c.stickAngle) * c.stickLength;
+
+        // Active strike frame window for hit detection
+        if (strikeProgress >= 0.2 && strikeProgress <= 0.8) {
+          const stickLeft = Math.min(handX, tipX);
+          const stickRight = Math.max(handX, tipX);
+          const stickTop = Math.min(handY, tipY);
+          const stickBottom = Math.max(handY, tipY);
+
+          const p = this.player;
+          const playerLeft = p.x + 4;
+          const playerRight = p.x + p.w - 4;
+          const playerTop = p.y + 4;
+          const playerBottom = p.y + p.h;
+
+          // Check horizontal reach: stick extends forward into player's horizontal bounding box
+          const horizontalHit = stickRight > playerLeft && stickLeft < playerRight;
+          // Check vertical reach:
+          const verticalHit = stickBottom > playerTop && stickTop < playerBottom;
+
+          // FAIR DODGE OPPORTUNITY:
+          // Stick swings low/mid (from ground up to groundY - 30).
+          // If the player jumped and is high enough (player.y + player.h < groundY - 26),
+          // the player dodges cleanly over the stick!
+          const isDodgingAirborne = playerBottom < (this.groundY - 26);
+
+          if (horizontalHit && verticalHit && !isDodgingAirborne) {
+            // Hit! Whack player
+            this.sound.play('whack');
+            this.burst(p.x + p.w / 2, p.y + p.h / 2, c.colorTheme.stickGlow, 24);
+            this.die();
+            return;
+          }
+        }
+
+        if (c.phaseTimer <= 0) {
+          c.attackPhase = 'recovery';
+          c.phaseTimer = 0.5; // 0.5s recovery retreat
+        }
+      } else if (c.attackPhase === 'recovery') {
+        c.phaseTimer -= dt;
+        const recProgress = 1 - Math.max(0, c.phaseTimer / 0.5);
+        // Smoothly slide back to base position
+        const maxLunge = c.id === 'EFOT' ? 30 : 44;
+        c.lungeX = maxLunge * (1 - recProgress);
+        c.x = c.baseX + c.lungeX;
+        // Return stick to carry angle
+        c.stickAngle = 0.8 - recProgress * 1.4;
+
+        if (c.phaseTimer <= 0) {
+          c.attackPhase = 'idle';
+          c.lungeX = 0;
+          c.x = c.baseX;
+          c.stickAngle = -0.6;
+          // Fair cooldown: 8 to 14 seconds
+          c.attackCooldown = 8.0 + Math.random() * 6.0;
+        }
+      }
     }
   }
 
@@ -387,9 +604,9 @@ export class GameEngine {
 
     for (const o of this.obstacles) {
       let ox = o.x + 4;
-      let oy = o.y + 4;
+      const oy = o.y + 4;
       let ow = o.w - 8;
-      let oh = o.h - 8;
+      const oh = o.h - 8;
       if (o.type === 'spike') {
         // triangle-ish: shrink horizontally
         ox = o.x + 8;
@@ -459,6 +676,12 @@ export class GameEngine {
     this.drawCoins(ctx);
     this.drawObstacles(ctx);
     this.drawParticles(ctx);
+
+    // Draw chasers behind player (sorted left-to-right)
+    const sortedChasers = [...this.chasers].sort((a, b) => a.x - b.x);
+    for (const c of sortedChasers) {
+      this.drawChaser(ctx, c);
+    }
     this.drawPlayer(ctx);
 
     if (this.flash > 0) {
@@ -568,6 +791,63 @@ export class GameEngine {
     }
   }
 
+  private drawNameLabel(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    centerX: number,
+    topY: number,
+    color: string,
+    bgColor: string,
+    showWarning = false
+  ) {
+    ctx.save();
+    ctx.font = 'bold 11px monospace, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const textWidth = ctx.measureText(text).width;
+    const paddingX = 6;
+    const badgeW = textWidth + paddingX * 2;
+    const badgeH = 15;
+    const badgeX = centerX - badgeW / 2;
+    const badgeY = topY - badgeH - 5;
+
+    // Background badge
+    ctx.fillStyle = bgColor;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    this.roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Text
+    ctx.fillStyle = color;
+    ctx.fillText(text, centerX, badgeY + badgeH / 2);
+
+    // Warning alert tag during attack telegraph
+    if (showWarning) {
+      const warnY = badgeY - 14;
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 1;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 8;
+      this.roundRect(ctx, centerX - 20, warnY, 40, 12, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px monospace, sans-serif';
+      ctx.fillText('! SWING', centerX, warnY + 6);
+    }
+
+    ctx.restore();
+  }
+
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const p = this.player;
     ctx.save();
@@ -611,6 +891,120 @@ export class GameEngine {
     ctx.fill();
 
     ctx.restore();
+
+    // Main player name label: TM
+    this.drawNameLabel(
+      ctx,
+      'TM',
+      p.x + p.w / 2,
+      p.y,
+      '#22d3ee',
+      '#082f49'
+    );
+  }
+
+  private drawChaser(ctx: CanvasRenderingContext2D, c: Chaser) {
+    ctx.save();
+    ctx.translate(c.x, c.y);
+
+    // glow
+    ctx.shadowColor = c.colorTheme.glow;
+    ctx.shadowBlur = c.attackPhase === 'windup' ? 22 : 14;
+
+    // body
+    const bodyGrad = ctx.createLinearGradient(0, 0, 0, c.h);
+    bodyGrad.addColorStop(0, c.colorTheme.primary);
+    bodyGrad.addColorStop(1, c.colorTheme.secondary);
+    ctx.fillStyle = bodyGrad;
+    this.roundRect(ctx, 2, 6, c.w - 4, c.h - 8, 8);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // visor
+    ctx.fillStyle = '#0f172a';
+    this.roundRect(ctx, 6, 12, c.w - 12, 13, 4);
+    ctx.fill();
+    ctx.fillStyle = c.colorTheme.visor;
+    ctx.fillRect(8, 14, c.w - 16, 3);
+
+    // legs (running animation)
+    ctx.fillStyle = c.colorTheme.secondary;
+    const swing = Math.sin(c.runFrame * Math.PI) * (c.onGround ? 6 : 0);
+    this.roundRect(ctx, 8, c.h - 10, 8, 12 + swing, 3);
+    ctx.fill();
+    this.roundRect(ctx, c.w - 16, c.h - 10, 8, 12 - swing, 3);
+    ctx.fill();
+
+    // arms & weapon stick
+    const armSwing = Math.sin(c.runFrame * Math.PI + Math.PI) * (c.onGround ? 5 : 0);
+    // back arm
+    ctx.fillStyle = c.colorTheme.secondary;
+    this.roundRect(ctx, -2, 16, 6, 13 - armSwing, 3);
+    ctx.fill();
+
+    // front arm with weapon stick
+    const handX = c.w - 2;
+    const handY = 22 + armSwing * 0.4;
+
+    ctx.save();
+    ctx.translate(handX, handY);
+    ctx.rotate(c.stickAngle);
+
+    // Strike swing arc visual trail
+    if (c.attackPhase === 'strike') {
+      ctx.save();
+      ctx.shadowColor = c.colorTheme.stickGlow;
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = `${c.colorTheme.stickGlow}77`;
+      ctx.lineWidth = 14;
+      ctx.beginPath();
+      ctx.arc(0, 0, c.stickLength * 0.85, -1.2, 0.4);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Stick handle / grip
+    ctx.fillStyle = '#334155';
+    this.roundRect(ctx, -3, -3, 9, 6, 2);
+    ctx.fill();
+
+    // Stick shaft (neon baton)
+    ctx.shadowColor = c.colorTheme.stickGlow;
+    ctx.shadowBlur = 10;
+    const stickGrad = ctx.createLinearGradient(0, 0, c.stickLength, 0);
+    stickGrad.addColorStop(0, '#94a3b8');
+    stickGrad.addColorStop(0.35, c.colorTheme.stickColor);
+    stickGrad.addColorStop(1, '#ffffff');
+    ctx.fillStyle = stickGrad;
+    this.roundRect(ctx, 4, -3, c.stickLength, 6, 3);
+    ctx.fill();
+
+    // Energy tip
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c.stickLength + 2, 0, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // front arm sleeve
+    ctx.fillStyle = c.colorTheme.secondary;
+    this.roundRect(ctx, c.w - 6, 16, 7, 13 + armSwing, 3);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Name label
+    const isTelegraphing = c.attackPhase === 'windup' || c.attackPhase === 'strike';
+    this.drawNameLabel(
+      ctx,
+      c.name,
+      c.x + c.w / 2,
+      c.y,
+      c.colorTheme.primary,
+      c.colorTheme.labelBg,
+      isTelegraphing
+    );
   }
 
   private drawObstacles(ctx: CanvasRenderingContext2D) {

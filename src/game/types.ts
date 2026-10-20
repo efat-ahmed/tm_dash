@@ -46,3 +46,34 @@ export interface Particle {
   color: string;
   gravity: number;
 }
+
+export type AttackPhase = 'idle' | 'windup' | 'strike' | 'recovery';
+
+export interface Chaser {
+  id: 'EFOT' | 'DADA';
+  name: string;
+  x: number;
+  baseX: number;
+  y: number;
+  w: number;
+  h: number;
+  vy: number;
+  onGround: boolean;
+  runFrame: number;
+  colorTheme: {
+    primary: string;
+    secondary: string;
+    visor: string;
+    glow: string;
+    labelBg: string;
+    stickColor: string;
+    stickGlow: string;
+  };
+  attackPhase: AttackPhase;
+  phaseTimer: number; // countdown timer for current attack phase in seconds
+  attackCooldown: number; // countdown until next attack can start
+  stickAngle: number; // radians
+  stickLength: number;
+  lungeX: number; // temporary forward surge during strike
+}
+
