@@ -2,7 +2,6 @@
 
 A polished, mobile-friendly **2D endless runner** browser game with a neon arcade aesthetic. Run, jump over obstacles, collect coins, and survive as the world speeds up. Built with React, TypeScript, Tailwind CSS, and an HTML Canvas game engine — no external game assets required.
 
-![TM Dash](https://bolt.new/static/og_default.png)
 
 ## Features
 
