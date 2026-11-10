@@ -39,6 +39,26 @@ function lerpColor(c1: string, c2: string, t: number): string {
   return `rgb(${r},${g},${bl})`;
 }
 
+// localStorage can throw in Safari private mode, sandboxed iframes and
+// storage-disabled browsers, so every access is guarded.
+function readNumber(key: string): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeNumber(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // Storage unavailable — scores simply won't persist.
+  }
+}
+
 export class GameEngine {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -47,6 +67,7 @@ export class GameEngine {
 
   private raf = 0;
   private idleRaf = 0;
+  private deathRaf = 0;
   private lastTime = 0;
   private state: GameState = 'ready';
 
@@ -74,8 +95,14 @@ export class GameEngine {
   private distance = 0;
   private score = 0;
   private coinCount = 0;
+  private coinBonus = 0;
   private best = 0;
   private totalCoinsSaved = 0;
+
+  // UI score updates are throttled to ~10/sec instead of every frame,
+  // so React doesn't re-render 60 times a second.
+  private scoreUiTimer = 0;
+  private reportedCoins = -1;
 
   // Generous obstacle and coin spacing
   private spawnTimer = 0;
@@ -107,8 +134,8 @@ export class GameEngine {
     this.sound = new SoundManager();
 
     this.groundY = this.H - 64; // y=296 is the walkable sand surface
-    this.best = Number(localStorage.getItem(BEST_KEY) || 0);
-    this.totalCoinsSaved = Number(localStorage.getItem(COIN_KEY) || 0);
+    this.best = readNumber(BEST_KEY);
+    this.totalCoinsSaved = readNumber(COIN_KEY);
 
     // TM starts at x=200, giving 130px+ clearance for followers behind,
     // and 700px of forward visibility ahead for obstacles
@@ -136,7 +163,12 @@ export class GameEngine {
   }
 
   start() {
+    // Cancel every running loop first — without this, each restart/restart
+    // from pause stacked another rAF chain and the game ran 2x, 3x, ... speed.
     cancelAnimationFrame(this.idleRaf);
+    cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.deathRaf);
+    this.deathRaf = 0;
     this.reset();
     this.setState('running');
     this.sound.resume();
@@ -170,6 +202,7 @@ export class GameEngine {
       cancelAnimationFrame(this.raf);
     } else if (this.state === 'paused') {
       this.setState('running');
+      cancelAnimationFrame(this.raf);
       this.lastTime = performance.now();
       this.loop(this.lastTime);
     }
@@ -210,6 +243,9 @@ export class GameEngine {
   destroy() {
     cancelAnimationFrame(this.raf);
     cancelAnimationFrame(this.idleRaf);
+    cancelAnimationFrame(this.deathRaf);
+    this.deathRaf = 0;
+    this.sound.dispose();
   }
 
   resize() {
@@ -401,6 +437,9 @@ export class GameEngine {
     this.distance = 0;
     this.score = 0;
     this.coinCount = 0;
+    this.coinBonus = 0;
+    this.scoreUiTimer = 0;
+    this.reportedCoins = -1;
     this.timeAlive = 0;
     this.obstacles = [];
     this.coins = [];
@@ -441,8 +480,16 @@ export class GameEngine {
       this.baseSpeed + this.distance * 0.0003
     );
     this.distance += this.speed * step;
-    this.score = Math.floor(this.distance / 7);
-    this.cb.onScore(this.score, this.coinCount);
+    // Coins award a real bonus that isn't wiped by this per-frame recompute.
+    this.score = Math.floor(this.distance / 7) + this.coinBonus;
+
+    // Throttle score pushes to the UI to ~10/sec; coins still update instantly.
+    this.scoreUiTimer += dt;
+    if (this.scoreUiTimer >= 0.1 || this.coinCount !== this.reportedCoins) {
+      this.scoreUiTimer = 0;
+      this.reportedCoins = this.coinCount;
+      this.cb.onScore(this.score, this.coinCount);
+    }
 
     // Player physics — gentle gravity for smooth floaty jumps
     const gravity = 0.58;
@@ -523,9 +570,8 @@ export class GameEngine {
     // Collisions
     this.checkCollisions();
 
-    // Decay effects
-    if (this.shake > 0) this.shake = Math.max(0, this.shake - step * 1.5);
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - step * 0.05);
+    // Screen shake / hit flash are decayed by the dedicated death effect loop
+    // (startDeathEffect) because update() stops running once the player dies.
 
     // Beach sand dust while running
     if (this.player.onGround && Math.random() < 0.06 * step) {
@@ -691,11 +737,14 @@ export class GameEngine {
   // ---- AI Chasers (EFOT & DADA) Following from Farther Away ----
 
   private updateChasers(dt: number, step: number) {
-    const isAnyOtherAttacking = this.chasers.some(
-      (c) => c.attackPhase === 'windup' || c.attackPhase === 'strike'
-    );
-
     for (const c of this.chasers) {
+      // Recomputed per chaser: previously this was snapshotted before the loop,
+      // so EFOT could enter 'windup' and DADA would still read the stale value
+      // and attack at the same time.
+      const isAnyOtherAttacking = this.chasers.some(
+        (o) => o !== c && (o.attackPhase === 'windup' || o.attackPhase === 'strike')
+      );
+
       c.runFrame += step * 0.28;
 
       const gravity = 0.58;
@@ -870,8 +919,9 @@ export class GameEngine {
       if (dx * dx + dy * dy < (c.r + 24) * (c.r + 24)) {
         c.collected = true;
         this.coinCount += 1;
-        this.score += 5;
-        this.distance += 25;
+        // Score bonus is tracked separately so the per-frame score recompute
+        // doesn't overwrite it. No artificial distance boost (it skewed speed).
+        this.coinBonus += 5;
         this.sound.play('coin');
         this.burst(c.x, c.y, 'rgba(255,210,80,', 10);
       }
@@ -883,16 +933,46 @@ export class GameEngine {
     this.shake = 12;
     this.flash = 1;
     this.burst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, 'rgba(255,70,90,', 24);
-    const finalScore = this.score;
+
+    // Stop the main loop; otherwise it kept rendering at 60fps behind the
+    // game-over overlay forever (and stacked with every restart).
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+
+    const finalScore = Math.floor(this.distance / 7) + this.coinBonus;
     const finalCoins = this.coinCount;
+    this.score = finalScore;
+    this.cb.onScore(finalScore, finalCoins);
+
     if (finalScore > this.best) {
       this.best = finalScore;
-      localStorage.setItem(BEST_KEY, String(this.best));
+      writeNumber(BEST_KEY, this.best);
     }
     this.totalCoinsSaved += finalCoins;
-    localStorage.setItem(COIN_KEY, String(this.totalCoinsSaved));
+    writeNumber(COIN_KEY, this.totalCoinsSaved);
+
     this.setState('gameover');
     this.cb.onGameOver(finalScore, finalCoins, this.best);
+    this.startDeathEffect();
+  }
+
+  // Short-lived loop that fades the death shake and red flash. These used to
+  // decay inside update(), which stops running on death — so the game-over
+  // screen jittered and stayed tinted red permanently.
+  private startDeathEffect() {
+    cancelAnimationFrame(this.deathRaf);
+    const tick = () => {
+      this.shake = Math.max(0, this.shake - 0.9);
+      this.flash = Math.max(0, this.flash - 0.06);
+      this.render();
+      if (this.shake > 0 || this.flash > 0) {
+        this.deathRaf = requestAnimationFrame(tick);
+      } else {
+        this.deathRaf = 0;
+        this.render();
+      }
+    };
+    this.deathRaf = requestAnimationFrame(tick);
   }
 
   // ---- Day/Night Cycle calculations ----

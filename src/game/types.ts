@@ -20,9 +20,6 @@ export interface Player {
 }
 
 export type ObstacleType =
-  | 'block'
-  | 'tall'
-  | 'spike'
   | 'driftwood'
   | 'rock'
   | 'beachball'

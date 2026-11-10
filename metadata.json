@@ -1,7 +1,5 @@
 {
-  "name": "TM Dash — Neon Endless Runner",
-  "description": "Run, jump, and collect coins in this neon arcade endless runner.",
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "name": "TM Dash — Beach Endless Runner",
+  "description": "Run, jump and collect coins along a neon tropical beach while dodging driftwood, beach balls, rocks and stick swings from EFOT and DADA.",
+  "capabilities": []
 }

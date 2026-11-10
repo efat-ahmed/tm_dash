@@ -155,6 +155,17 @@ export default function TMDash() {
   // Keyboard controls
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Let focused controls handle Space/Enter themselves instead of
+      // swallowing the key and preventing button activation.
+      const el = e.target as HTMLElement | null;
+      const isInteractive =
+        !!el &&
+        (el.tagName === 'BUTTON' ||
+          el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.isContentEditable);
+      if (isInteractive && (e.code === 'Space' || e.code === 'Enter')) return;
+
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
         if (state === 'paused') return;
@@ -315,7 +326,12 @@ export default function TMDash() {
         }}
         className="relative z-10 w-full max-w-[1000px] flex-1 max-h-[calc(100dvh-130px)] aspect-[900/360] rounded-2xl overflow-hidden border border-amber-500/30 shadow-[0_0_40px_rgba(251,191,36,0.15)] touch-none bg-[#091524] cursor-pointer mx-auto flex items-center justify-center"
       >
-        <canvas ref={canvasRef} className="block w-full h-full object-contain" />
+        <canvas
+          ref={canvasRef}
+          className="block w-full h-full object-contain"
+          role="img"
+          aria-label="TM Dash beach runner game canvas"
+        />
 
         {/* Start screen */}
         {state === 'ready' && (
@@ -352,7 +368,7 @@ export default function TMDash() {
                 PAUSED
               </div>
               <div className="mb-2 text-xs font-mono text-white/70">
-                Current Time: <span className="text-amber-300 font-bold">{timeOfDay}</span>
+                Time of Day: <span className="text-amber-300 font-bold">{timeOfDay}</span>
               </div>
               <NeonButton onClick={handlePause} variant="cyan">
                 <Play className="w-5 h-5" /> RESUME

@@ -29,6 +29,20 @@ export class SoundManager {
     return this.enabled;
   }
 
+  // Release the AudioContext. Browsers cap the number of live contexts
+  // (roughly 6), and without this every engine remount leaked one until
+  // audio silently stopped working.
+  dispose() {
+    const ctx = this.ctx;
+    this.ctx = null;
+    this.master = null;
+    if (ctx && ctx.state !== 'closed') {
+      void ctx.close().catch(() => {
+        /* already closed */
+      });
+    }
+  }
+
   play(name: SoundName) {
     if (!this.enabled) return;
     const ctx = this.ensure();
@@ -49,6 +63,24 @@ export class SoundManager {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       src.connect(g);
       g.connect(out);
+      src.start(now);
+      return;
+    }
+
+    if (name === 'splash') {
+      // Ocean wave / sand splash — noise only, no oscillator.
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.35));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const splashGain = ctx.createGain();
+      splashGain.gain.setValueAtTime(0.3, now);
+      splashGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
+      src.connect(splashGain);
+      splashGain.connect(out);
       src.start(now);
       return;
     }
@@ -141,21 +173,6 @@ export class SoundManager {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
       osc.start(now);
       osc.stop(now + 0.17);
-    } else if (name === 'splash') {
-      // Ocean wave / sand splash
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.35));
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      const splashGain = ctx.createGain();
-      splashGain.gain.setValueAtTime(0.3, now);
-      splashGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
-      src.connect(splashGain);
-      splashGain.connect(out);
-      src.start(now);
     }
   }
 }

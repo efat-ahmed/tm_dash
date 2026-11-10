@@ -11,13 +11,21 @@ dist
 dist-ssr
 *.local
 
+# Editor / tooling scaffolding
 .vscode/*
 !.vscode/extensions.json
 .idea
+.bolt
 .DS_Store
+
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.tsbuildinfo
+
+# Environment
 .env
+.env.*
+!.env.example
