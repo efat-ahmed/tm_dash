@@ -13,7 +13,7 @@ Built with React 18, TypeScript, Vite, Tailwind CSS and a hand-written HTML Canv
 - **Collectible coins** in arcs, waves and stair patterns, with a per-coin score bonus
 - **Progressive difficulty** — speed ramps gently from 4.0 to a capped 7.8, spawn gaps tighten as you go
 - **Two AI chasers** (EFOT and DADA) who follow behind, telegraph with **! SWING**, and lunge with a stick you must jump over. Only one can attack at a time
-- **Scooter riders** (HM and CM) who periodically cross the screen, auto-jump obstacles and beep
+- **Scooter riders** (HM and CM) who periodically cruise toward TM from the right, hop once over obstacles, and beep
 - **Day/night cycle** — a continuous 76-second sunrise → day → sunset → night loop that repaints the sky, ocean, sand and palette
 - **Full game flow** — start screen, pause/resume, game over with score / coins / best
 - **Persistent stats** — best score and total coins in `localStorage` (`tmdash_best`, `tmdash_coins_total`), guarded against blocked storage
@@ -28,10 +28,10 @@ Built with React 18, TypeScript, Vite, Tailwind CSS and a hand-written HTML Canv
 | Tag | Role | Behaviour |
 | --- | --- | --- |
 | **TM** | Player | Runs automatically, double jump, collects coins |
-| **EFOT** | Chaser | Follows ~130px behind, lunges 80px to swing a stick |
-| **DADA** | Chaser | Follows ~205px behind, lunges 135px to swing a stick |
-| **HM** | Scooter rider | Crosses periodically on a teal scooter |
-| **CM** | Scooter rider | Crosses periodically on an amber scooter |
+| **EFOT** | Chaser | Follows ~104px behind, lunges 54px to swing a stick |
+| **DADA** | Chaser | Follows ~172px behind, lunges 102px to swing a stick |
+| **HM** | Scooter rider | Oncoming teal scooter that hops over obstacles |
+| **CM** | Scooter rider | Oncoming amber scooter that hops over obstacles |
 
 ---
 

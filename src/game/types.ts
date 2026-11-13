@@ -17,6 +17,7 @@ export interface Player {
   onGround: boolean;
   jumpsLeft: number;
   runFrame: number;
+  squashTimer: number;
 }
 
 export type ObstacleType =
@@ -64,12 +65,14 @@ export interface Chaser {
   name: string;
   x: number;
   baseX: number;
+  strikeX: number;
   y: number;
   w: number;
   h: number;
   vy: number;
   onGround: boolean;
   runFrame: number;
+  squashTimer: number;
   colorTheme: {
     primary: string;
     secondary: string;
@@ -94,13 +97,14 @@ export interface ScooterRider {
   y: number;
   w: number;
   h: number;
-  speed: number;
+  cruise: number;
   vy: number;
   onGround: boolean;
   wheelRotation: number;
   bobPhase: number;
   active: boolean;
   spawnCooldown: number;
+  lastHopped: Obstacle | null;
   colorTheme: {
     rider: string;
     shirt: string;

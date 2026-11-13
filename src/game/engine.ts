@@ -13,6 +13,9 @@ import { SoundManager } from './sound';
 
 const BEST_KEY = 'tmdash_best';
 const COIN_KEY = 'tmdash_coins_total';
+const SCOOTER_SCALE = 1.6;
+const HM_CRUISE = 3.8;
+const CM_CRUISE = 4.4;
 
 interface ColorRGB {
   r: number;
@@ -130,6 +133,7 @@ export class GameEngine {
       onGround: true,
       jumpsLeft: 2,
       runFrame: 0,
+      squashTimer: 0,
     };
 
     this.initScenery();
@@ -300,20 +304,21 @@ export class GameEngine {
   }
 
   private initChasers(): Chaser[] {
-    // EFOT and DADA follow from 130px to 210px behind TM (which is at x=200)
-    // 2-3x farther than original 58px distance!
+    // EFOT and DADA follow ~104px and ~172px behind TM (x=200), both fully on-screen
     return [
       {
         id: 'EFOT',
         name: 'EFOT',
-        baseX: 70, // 130px behind TM
-        x: 70,
+        baseX: 96, // 104px behind TM
+        strikeX: 150,
+        x: 96,
         y: this.groundY - 46,
         w: 36,
         h: 46,
         vy: 0,
         onGround: true,
         runFrame: 0,
+        squashTimer: 0,
         colorTheme: {
           primary: '#f97316',
           secondary: '#c2410c',
@@ -333,14 +338,16 @@ export class GameEngine {
       {
         id: 'DADA',
         name: 'DADA',
-        baseX: -5, // 205px behind TM, 75px behind EFOT
-        x: -5,
+        baseX: 28, // 172px behind TM, 68px behind EFOT
+        strikeX: 130,
+        x: 28,
         y: this.groundY - 46,
         w: 36,
         h: 46,
         vy: 0,
         onGround: true,
         runFrame: 0.5,
+        squashTimer: 0,
         colorTheme: {
           primary: '#d946ef',
           secondary: '#9333ea',
@@ -361,21 +368,23 @@ export class GameEngine {
   }
 
   private initScooters(): ScooterRider[] {
+    const size = 48 * SCOOTER_SCALE;
     return [
       {
         id: 'HM',
         name: 'HM',
         x: this.W + 80,
-        y: this.groundY - 48,
-        w: 48,
-        h: 48,
-        speed: 3.5, // Slower, relaxed beach cruising speed (was 7.5)
+        y: this.groundY - size,
+        w: size,
+        h: size,
+        cruise: HM_CRUISE,
         vy: 0,
         onGround: true,
         wheelRotation: 0,
         bobPhase: 0,
         active: false,
         spawnCooldown: 18,
+        lastHopped: null,
         colorTheme: {
           rider: '#059669',
           shirt: '#10b981',
@@ -390,16 +399,17 @@ export class GameEngine {
         id: 'CM',
         name: 'CM',
         x: this.W + 160,
-        y: this.groundY - 48,
-        w: 48,
-        h: 48,
-        speed: 4.2, // Slower, relaxed beach cruising speed (was 8.5)
+        y: this.groundY - size,
+        w: size,
+        h: size,
+        cruise: CM_CRUISE,
         vy: 0,
         onGround: true,
         wheelRotation: 0,
         bobPhase: 1.5,
         active: false,
         spawnCooldown: 36,
+        lastHopped: null,
         colorTheme: {
           rider: '#e11d48',
           shirt: '#fb7185',
@@ -439,6 +449,7 @@ export class GameEngine {
     this.player.vy = 0;
     this.player.onGround = true;
     this.player.jumpsLeft = 2;
+    this.player.squashTimer = 0;
     this.chasers = this.initChasers();
     this.scooters = this.initScooters();
   }
@@ -474,10 +485,16 @@ export class GameEngine {
     this.player.y += this.player.vy * step;
     if (this.player.y >= this.groundY - this.player.h) {
       this.player.y = this.groundY - this.player.h;
-      if (!this.player.onGround) this.spawnSandDust(this.player.x + 8, this.groundY, 4);
+      if (!this.player.onGround) {
+        this.player.squashTimer = 0.08;
+        this.spawnSandDust(this.player.x + 8, this.groundY, 4);
+      }
       this.player.vy = 0;
       this.player.onGround = true;
       this.player.jumpsLeft = 2;
+    }
+    if (this.player.squashTimer > 0) {
+      this.player.squashTimer = Math.max(0, this.player.squashTimer - dt);
     }
     this.player.runFrame += step * 0.28;
 
@@ -664,19 +681,21 @@ export class GameEngine {
         if (sc.spawnCooldown <= 0) {
           const other = this.scooters.find((s) => s.id !== sc.id);
           // Never spawn right on top of each other
-          if (!other || !other.active || other.x < this.W - 140) {
+          if (!other || !other.active || other.x < this.W - (sc.w + 120)) {
             sc.active = true;
             sc.x = this.W + 50;
             sc.y = this.groundY - sc.h;
             sc.vy = 0;
             sc.onGround = true;
+            sc.lastHopped = null;
             this.sound.play('beep');
           }
         }
       } else {
-        // Relaxed, enjoyable cruising pace
-        sc.x -= (this.speed * 0.75 + sc.speed * 0.25) * step;
-        sc.wheelRotation += step * 0.12;
+        // Oncoming left-facing cruiser: vs = world speed + relative cruise speed
+        const vs = this.speed + sc.cruise;
+        sc.x -= vs * step;
+        sc.wheelRotation -= step * 0.14;
         sc.bobPhase += step * 0.08;
 
         // Scooter physics
@@ -689,14 +708,16 @@ export class GameEngine {
           sc.onGround = true;
         }
 
-        // Scooter auto-jump over approaching obstacles
+        // Hop at most once per approaching obstacle (obstacles lie to the left)
         if (sc.onGround) {
           for (const o of this.obstacles) {
-            const dist = o.x - (sc.x + sc.w);
-            if (dist > -10 && dist < 45) {
+            if (sc.lastHopped === o) continue;
+            const gap = sc.x - (o.x + o.w);
+            if (gap > 0 && gap < sc.cruise * 12) {
               sc.vy = -10.5;
               sc.onGround = false;
-              this.spawnSandDust(sc.x, this.groundY, 3);
+              sc.lastHopped = o;
+              this.spawnSandDust(sc.x + sc.w * 0.3, this.groundY, 3);
               break;
             }
           }
@@ -705,6 +726,7 @@ export class GameEngine {
         // Deactivate once exited off the left side
         if (sc.x + sc.w < -60) {
           sc.active = false;
+          sc.lastHopped = null;
           // Long relaxed cooldown between passes (28 - 45s)
           sc.spawnCooldown = 28 + Math.random() * 18;
         }
@@ -713,6 +735,22 @@ export class GameEngine {
   }
 
   // ---- AI Chasers (EFOT & DADA) Following from Farther Away ----
+
+  private maxLunge(c: Chaser) {
+    return c.strikeX - c.baseX;
+  }
+
+  private getStickGeometry(c: Chaser) {
+    const handX = c.x + c.w - 2;
+    const handY = c.y + 22;
+    const reach = c.stickLength + 5.5;
+    return {
+      handX,
+      handY,
+      tipX: handX + Math.cos(c.stickAngle) * reach,
+      tipY: handY + Math.sin(c.stickAngle) * reach,
+    };
+  }
 
   private updateChasers(dt: number, step: number) {
     const isAnyOtherAttacking = this.chasers.some(
@@ -727,8 +765,12 @@ export class GameEngine {
       c.y += c.vy * step;
       if (c.y >= this.groundY - c.h) {
         c.y = this.groundY - c.h;
+        if (!c.onGround) c.squashTimer = 0.08;
         c.vy = 0;
         c.onGround = true;
+      }
+      if (c.squashTimer > 0) {
+        c.squashTimer = Math.max(0, c.squashTimer - dt);
       }
 
       // Jump over obstacles smoothly
@@ -766,10 +808,8 @@ export class GameEngine {
         const windupProgress = 1 - Math.max(0, c.phaseTimer / 1.25);
         c.stickAngle = -0.6 - windupProgress * 1.3;
 
-        // Smoothly glide forward into strike distance behind TM (at x=200)
-        // EFOT (baseX=70) surges forward by up to 80px (reaching x=150)
-        // DADA (baseX=-5) surges forward by up to 135px (reaching x=130)
-        const maxLunge = c.id === 'EFOT' ? 80 : 135;
+        // Smoothly glide forward toward strikeX behind TM (x=200)
+        const maxLunge = this.maxLunge(c);
         c.lungeX = windupProgress * maxLunge;
         const targetX = c.baseX + c.lungeX;
         c.x += (targetX - c.x) * (step * 0.1);
@@ -780,16 +820,15 @@ export class GameEngine {
           this.sound.play('swing');
         }
       } else if (c.attackPhase === 'strike') {
-        const strikeLunge = c.id === 'EFOT' ? 80 : 135;
+        const strikeLunge = this.maxLunge(c);
         c.x += (c.baseX + strikeLunge - c.x) * (step * 0.25);
         c.phaseTimer -= dt;
         const strikeProgress = 1 - Math.max(0, c.phaseTimer / 0.20);
         c.stickAngle = -1.9 + strikeProgress * 2.7;
 
-        const handX = c.x + c.w - 4;
-        const handY = c.y + c.h * 0.55;
-        const tipX = handX + Math.cos(c.stickAngle) * c.stickLength;
-        const tipY = handY + Math.sin(c.stickAngle) * c.stickLength;
+        // At strikeX: EFOT handX=184 + reach 51.5 = 235.5 > 206 (TM left edge);
+        // DADA handX=164 + reach 61.5 = 225.5 > 206. Both hit grounded TM & miss airborne TM.
+        const { handX, handY, tipX, tipY } = this.getStickGeometry(c);
 
         // Active strike window
         if (strikeProgress >= 0.25 && strikeProgress <= 0.75) {
@@ -825,7 +864,7 @@ export class GameEngine {
       } else if (c.attackPhase === 'recovery') {
         c.phaseTimer -= dt;
         const recProgress = 1 - Math.max(0, c.phaseTimer / 0.70);
-        const maxLunge = c.id === 'EFOT' ? 80 : 135;
+        const maxLunge = this.maxLunge(c);
         c.lungeX = maxLunge * (1 - recProgress);
 
         const targetX = c.baseX + c.lungeX;
@@ -835,7 +874,6 @@ export class GameEngine {
         if (c.phaseTimer <= 0) {
           c.attackPhase = 'idle';
           c.lungeX = 0;
-          c.x = c.baseX;
           c.stickAngle = -0.6;
           // Long cooldown between attacks (20 to 32 seconds!)
           c.attackCooldown = 20.0 + Math.random() * 12.0;
@@ -1456,62 +1494,104 @@ export class GameEngine {
   // ---- Scooter Riders (HM and CM) Rendering ----
 
   private drawScooter(ctx: CanvasRenderingContext2D, sc: ScooterRider) {
-    ctx.save();
+    const DESIGN_W = 48;
+    const DESIGN_H = 48;
     const bob = Math.sin(sc.bobPhase) * 1.2;
-    ctx.translate(sc.x, sc.y + bob);
 
-    // Scooter Deck
+    this.drawGroundShadow(ctx, sc.x + sc.w * 0.5, sc.y + sc.h, 28);
+
+    ctx.save();
+    const cx = sc.x + sc.w * 0.5;
+    const cy = sc.y + sc.h * 0.5 + bob;
+    const tilt = sc.onGround ? 0 : Math.max(-0.2, Math.min(0.2, sc.vy * 0.02));
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt);
+    ctx.scale(SCOOTER_SCALE, SCOOTER_SCALE);
+    ctx.translate(-DESIGN_W * 0.5, -DESIGN_H * 0.5);
+
+    // Scooter Deck with dark outline
     ctx.fillStyle = sc.colorTheme.scooter;
-    this.roundRect(ctx, 4, sc.h - 12, sc.w - 12, 5, 2);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    this.roundRect(ctx, 4, DESIGN_H - 12, DESIGN_W - 12, 5, 2);
     ctx.fill();
+    ctx.stroke();
 
     // Steering Column & Handlebars
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(8, DESIGN_H - 12);
+    ctx.lineTo(6, DESIGN_H - 32);
+    ctx.stroke();
+
     ctx.strokeStyle = sc.colorTheme.accent;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(8, sc.h - 12);
-    ctx.lineTo(6, sc.h - 32);
+    ctx.moveTo(8, DESIGN_H - 12);
+    ctx.lineTo(6, DESIGN_H - 32);
     ctx.stroke();
 
     ctx.fillStyle = '#1e293b';
-    this.roundRect(ctx, 2, sc.h - 34, 10, 4, 1.5);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    this.roundRect(ctx, 2, DESIGN_H - 34, 10, 4, 1.5);
     ctx.fill();
+    ctx.stroke();
 
     // Headlight
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = '#fef08a';
     ctx.shadowBlur = 6;
     ctx.beginPath();
-    ctx.arc(4, sc.h - 28, 3, 0, Math.PI * 2);
+    ctx.arc(4, DESIGN_H - 28, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
 
     // Wheels
-    this.drawWheel(ctx, 8, sc.h - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
-    this.drawWheel(ctx, sc.w - 12, sc.h - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
+    this.drawWheel(ctx, 8, DESIGN_H - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
+    this.drawWheel(ctx, DESIGN_W - 12, DESIGN_H - 6, 6, sc.wheelRotation, sc.colorTheme.wheels);
 
-    // Rider Character
-    const rx = sc.w * 0.45;
-    const ry = sc.h - 34;
+    // Enlarged Rider Character
+    const rx = DESIGN_W * 0.46;
+    const ry = DESIGN_H - 34;
 
+    // Shirt (15x18) with dark outline
     ctx.fillStyle = sc.colorTheme.shirt;
-    this.roundRect(ctx, rx - 6, ry, 13, 16, 4);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    this.roundRect(ctx, rx - 7.5, ry, 15, 18, 4);
     ctx.fill();
+    ctx.stroke();
 
+    // Head (radius 9) with dark outline
     ctx.fillStyle = sc.colorTheme.rider;
     ctx.beginPath();
-    ctx.arc(rx, ry - 6, 7, 0, Math.PI * 2);
+    ctx.arc(rx, ry - 7, 9, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
 
+    // Visible helmet/visor strip in the rider color
     ctx.fillStyle = '#0f172a';
-    this.roundRect(ctx, rx - 7, ry - 7, 7, 4, 1);
+    this.roundRect(ctx, rx - 9, ry - 9, 10, 5, 1.5);
     ctx.fill();
+    ctx.fillStyle = sc.colorTheme.rider;
+    ctx.fillRect(rx - 8, ry - 8, 7, 2.5);
+
+    // Thicker arm (3px) with dark outline
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(rx - 2, ry + 5);
+    ctx.lineTo(8, DESIGN_H - 30);
+    ctx.stroke();
 
     ctx.strokeStyle = sc.colorTheme.rider;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(rx - 2, ry + 4);
-    ctx.lineTo(8, sc.h - 30);
+    ctx.moveTo(rx - 2, ry + 5);
+    ctx.lineTo(8, DESIGN_H - 30);
     ctx.stroke();
 
     ctx.restore();
@@ -1520,9 +1600,11 @@ export class GameEngine {
       ctx,
       sc.name,
       sc.x + sc.w * 0.5,
-      sc.y + bob - 12,
+      sc.y + bob - 6,
       sc.colorTheme.labelColor,
-      sc.colorTheme.labelBg
+      sc.colorTheme.labelBg,
+      false,
+      13
     );
   }
 
@@ -1562,6 +1644,27 @@ export class GameEngine {
 
   // ---- Characters (TM, EFOT, DADA) and Labels ----
 
+  private drawGroundShadow(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    bottomY: number,
+    baseRadiusX: number
+  ) {
+    const height = Math.max(0, this.groundY - bottomY);
+    const t = Math.max(0, 1 - height / 140);
+    const rx = baseRadiusX * (0.45 + 0.55 * t);
+    const ry = 4 * (0.5 + 0.5 * t);
+    const alpha = 0.34 * t;
+    if (alpha <= 0.01) return;
+
+    ctx.save();
+    ctx.fillStyle = `rgba(5, 11, 20, ${alpha.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.ellipse(centerX, this.groundY + 1, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawNameLabel(
     ctx: CanvasRenderingContext2D,
     text: string,
@@ -1569,18 +1672,20 @@ export class GameEngine {
     topY: number,
     color: string,
     bgColor: string,
-    showWarning = false
+    showWarning = false,
+    fontSize = 11
   ) {
     ctx.save();
-    ctx.font = 'bold 11px monospace, sans-serif';
+    ctx.font = `bold ${fontSize}px monospace, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const textWidth = ctx.measureText(text).width;
     const paddingX = 6;
     const badgeW = textWidth + paddingX * 2;
-    const badgeH = 15;
-    const badgeX = centerX - badgeW / 2;
+    const badgeH = fontSize + 4;
+    const badgeX = Math.max(4, Math.min(this.W - badgeW - 4, centerX - badgeW / 2));
+    const badgeCenterX = badgeX + badgeW / 2;
     const badgeY = topY - badgeH - 5;
 
     ctx.fillStyle = bgColor;
@@ -1593,24 +1698,132 @@ export class GameEngine {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#0f172a';
+    ctx.strokeText(text, badgeCenterX, badgeY + badgeH / 2);
     ctx.fillStyle = color;
-    ctx.fillText(text, centerX, badgeY + badgeH / 2);
+    ctx.fillText(text, badgeCenterX, badgeY + badgeH / 2);
 
     if (showWarning) {
+      const warnW = 40;
+      const warnH = 12;
+      const warnX = Math.max(4, Math.min(this.W - warnW - 4, centerX - warnW / 2));
       const warnY = badgeY - 14;
       ctx.fillStyle = '#ef4444';
       ctx.strokeStyle = '#fef08a';
       ctx.lineWidth = 1;
       ctx.shadowColor = '#ef4444';
       ctx.shadowBlur = 8;
-      this.roundRect(ctx, centerX - 20, warnY, 40, 12, 3);
+      this.roundRect(ctx, warnX, warnY, warnW, warnH, 3);
       ctx.fill();
       ctx.stroke();
       ctx.shadowBlur = 0;
 
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 9px monospace, sans-serif';
-      ctx.fillText('! SWING', centerX, warnY + 6);
+      ctx.fillText('! SWING', warnX + warnW / 2, warnY + 6);
+    }
+
+    ctx.restore();
+  }
+
+  private drawRunnerBody(
+    ctx: CanvasRenderingContext2D,
+    opts: {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      vy: number;
+      onGround: boolean;
+      runFrame: number;
+      squashTimer: number;
+      primary: string;
+      secondary: string;
+      visorBg: string;
+      visorAccent: string;
+      glow: string;
+      glowBlur: number;
+      legColor: string;
+      drawFrontArm: boolean;
+    }
+  ) {
+    const bob = opts.onGround ? Math.sin(opts.runFrame * Math.PI * 2) * 1.3 - 0.4 : 0;
+    const lean = opts.onGround
+      ? 0.05
+      : Math.max(-0.15, Math.min(0.15, opts.vy * 0.02));
+    const sq = opts.squashTimer > 0 ? opts.squashTimer / 0.08 : 0;
+    const sx = 1 + 0.06 * sq;
+    const sy = 1 - 0.08 * sq;
+
+    ctx.save();
+    ctx.translate(opts.x + opts.w / 2, opts.y + opts.h);
+    ctx.scale(sx, sy);
+    ctx.rotate(lean);
+    ctx.translate(-opts.w / 2, -opts.h + bob);
+
+    const legW = opts.w >= 38 ? 9 : 8;
+    const legH = 12;
+    const hipY = opts.h - 12;
+    const frontLegAngle = opts.onGround ? Math.sin(opts.runFrame * Math.PI) * 0.6 : 0.3;
+    const backLegAngle = opts.onGround ? Math.sin(opts.runFrame * Math.PI + Math.PI) * 0.6 : -0.35;
+    const backArmAngle = opts.onGround ? Math.sin(opts.runFrame * Math.PI + Math.PI) * 0.6 : 0.35;
+    const frontArmAngle = opts.onGround ? Math.sin(opts.runFrame * Math.PI) * 0.6 : -0.35;
+
+    // Back arm (rotates around shoulder, opposite phase to front leg)
+    ctx.save();
+    ctx.translate(2, 18);
+    ctx.rotate(backArmAngle);
+    ctx.fillStyle = opts.legColor;
+    this.roundRect(ctx, -3, 0, 6, 13, 3);
+    ctx.fill();
+    ctx.restore();
+
+    // Back leg (rotates around hip)
+    ctx.save();
+    ctx.translate(12, hipY);
+    ctx.rotate(backLegAngle);
+    ctx.fillStyle = opts.legColor;
+    this.roundRect(ctx, -legW / 2, 0, legW, legH, 3);
+    ctx.fill();
+    ctx.restore();
+
+    // Torso
+    ctx.shadowColor = opts.glow;
+    ctx.shadowBlur = opts.glowBlur;
+    const bodyGrad = ctx.createLinearGradient(0, 0, 0, opts.h);
+    bodyGrad.addColorStop(0, opts.primary);
+    bodyGrad.addColorStop(1, opts.secondary);
+    ctx.fillStyle = bodyGrad;
+    this.roundRect(ctx, 2, 6, opts.w - 4, opts.h - 8, 8);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Visor
+    ctx.fillStyle = opts.visorBg;
+    this.roundRect(ctx, 6, 12, opts.w - 12, 14, 4);
+    ctx.fill();
+    ctx.fillStyle = opts.visorAccent;
+    ctx.fillRect(8, 14, opts.w - 16, 3);
+
+    // Front leg (rotates around hip)
+    ctx.save();
+    ctx.translate(opts.w - 12, hipY);
+    ctx.rotate(frontLegAngle);
+    ctx.fillStyle = opts.legColor;
+    this.roundRect(ctx, -legW / 2, 0, legW, legH, 3);
+    ctx.fill();
+    ctx.restore();
+
+    // Front arm (for TM; chasers draw stick from getStickGeometry)
+    if (opts.drawFrontArm) {
+      ctx.save();
+      ctx.translate(opts.w - 2, 18);
+      ctx.rotate(frontArmAngle);
+      ctx.fillStyle = opts.legColor;
+      this.roundRect(ctx, -3, 0, 6, 13, 3);
+      ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();
@@ -1618,87 +1831,55 @@ export class GameEngine {
 
   private drawPlayer(ctx: CanvasRenderingContext2D) {
     const p = this.player;
-    ctx.save();
-    ctx.translate(p.x, p.y);
+    this.drawGroundShadow(ctx, p.x + p.w / 2, p.y + p.h, 17);
 
-    ctx.shadowColor = '#39ff14';
-    ctx.shadowBlur = 14;
-
-    // Body
-    const bodyGrad = ctx.createLinearGradient(0, 0, 0, p.h);
-    bodyGrad.addColorStop(0, '#5cff5c');
-    bodyGrad.addColorStop(1, '#1faf1f');
-    ctx.fillStyle = bodyGrad;
-    this.roundRect(ctx, 2, 6, p.w - 4, p.h - 8, 8);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-
-    // Visor
-    ctx.fillStyle = '#06280a';
-    this.roundRect(ctx, 6, 12, p.w - 12, 14, 5);
-    ctx.fill();
-    ctx.fillStyle = '#aaffaa';
-    ctx.fillRect(8, 14, p.w - 16, 3);
-
-    // Legs (running)
-    ctx.fillStyle = '#0c8a0c';
-    const swing = Math.sin(p.runFrame * Math.PI) * (p.onGround ? 5 : 0);
-    this.roundRect(ctx, 8, p.h - 10, 9, 12 + swing, 3);
-    ctx.fill();
-    this.roundRect(ctx, p.w - 17, p.h - 10, 9, 12 - swing, 3);
-    ctx.fill();
-
-    // Arms
-    const armSwing = Math.sin(p.runFrame * Math.PI + Math.PI) * (p.onGround ? 4 : 0);
-    this.roundRect(ctx, -3, 16, 7, 14 + armSwing, 3);
-    ctx.fill();
-    this.roundRect(ctx, p.w - 4, 16, 7, 14 - armSwing, 3);
-    ctx.fill();
-
-    ctx.restore();
+    this.drawRunnerBody(ctx, {
+      x: p.x,
+      y: p.y,
+      w: p.w,
+      h: p.h,
+      vy: p.vy,
+      onGround: p.onGround,
+      runFrame: p.runFrame,
+      squashTimer: p.squashTimer,
+      primary: '#5cff5c',
+      secondary: '#1faf1f',
+      visorBg: '#06280a',
+      visorAccent: '#aaffaa',
+      glow: '#39ff14',
+      glowBlur: 14,
+      legColor: '#0c8a0c',
+      drawFrontArm: true,
+    });
 
     // Exact label for TM
     this.drawNameLabel(ctx, 'TM', p.x + p.w / 2, p.y, '#22d3ee', '#082f49');
   }
 
   private drawChaser(ctx: CanvasRenderingContext2D, c: Chaser) {
-    ctx.save();
-    ctx.translate(c.x, c.y);
+    this.drawGroundShadow(ctx, c.x + c.w / 2, c.y + c.h, 16);
 
-    ctx.shadowColor = c.colorTheme.glow;
-    ctx.shadowBlur = c.attackPhase === 'windup' ? 22 : 12;
+    this.drawRunnerBody(ctx, {
+      x: c.x,
+      y: c.y,
+      w: c.w,
+      h: c.h,
+      vy: c.vy,
+      onGround: c.onGround,
+      runFrame: c.runFrame,
+      squashTimer: c.squashTimer,
+      primary: c.colorTheme.primary,
+      secondary: c.colorTheme.secondary,
+      visorBg: '#0f172a',
+      visorAccent: c.colorTheme.visor,
+      glow: c.colorTheme.glow,
+      glowBlur: c.attackPhase === 'windup' ? 22 : 12,
+      legColor: c.colorTheme.secondary,
+      drawFrontArm: false,
+    });
 
-    const bodyGrad = ctx.createLinearGradient(0, 0, 0, c.h);
-    bodyGrad.addColorStop(0, c.colorTheme.primary);
-    bodyGrad.addColorStop(1, c.colorTheme.secondary);
-    ctx.fillStyle = bodyGrad;
-    this.roundRect(ctx, 2, 6, c.w - 4, c.h - 8, 8);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = '#0f172a';
-    this.roundRect(ctx, 6, 12, c.w - 12, 13, 4);
-    ctx.fill();
-    ctx.fillStyle = c.colorTheme.visor;
-    ctx.fillRect(8, 14, c.w - 16, 3);
-
-    // Legs
-    ctx.fillStyle = c.colorTheme.secondary;
-    const swing = Math.sin(c.runFrame * Math.PI) * (c.onGround ? 5 : 0);
-    this.roundRect(ctx, 8, c.h - 10, 8, 12 + swing, 3);
-    ctx.fill();
-    this.roundRect(ctx, c.w - 16, c.h - 10, 8, 12 - swing, 3);
-    ctx.fill();
-
-    // Arms & Stick
-    const armSwing = Math.sin(c.runFrame * Math.PI + Math.PI) * (c.onGround ? 4 : 0);
-    this.roundRect(ctx, -2, 16, 6, 13 - armSwing, 3);
-    ctx.fill();
-
-    const handX = c.w - 2;
-    const handY = 22 + armSwing * 0.4;
+    // Stick & stick arm pivoted at exact world-space getStickGeometry(c)
+    const { handX, handY } = this.getStickGeometry(c);
 
     ctx.save();
     ctx.translate(handX, handY);
@@ -1739,9 +1920,11 @@ export class GameEngine {
     ctx.fill();
     ctx.restore();
 
-    this.roundRect(ctx, c.w - 6, 16, 7, 13 + armSwing, 3);
+    // Front arm holding stick
+    ctx.save();
+    ctx.fillStyle = c.colorTheme.secondary;
+    this.roundRect(ctx, c.x + c.w - 6, c.y + 16, 7, 11, 3);
     ctx.fill();
-
     ctx.restore();
 
     const isTelegraphing = c.attackPhase === 'windup' || c.attackPhase === 'strike';
