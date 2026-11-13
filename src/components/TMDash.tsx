@@ -75,12 +75,13 @@ export default function TMDash() {
     }
 
     // Initial render loop for animated idle background on start screen
-    requestAnimationFrame(() => {
+    const initialRaf = requestAnimationFrame(() => {
       engine.resize();
       engine.idleRender();
     });
 
     return () => {
+      cancelAnimationFrame(initialRaf);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
       ro?.disconnect();
@@ -105,6 +106,7 @@ export default function TMDash() {
   }, []);
 
   const handleRestart = useCallback(() => {
+    if (engineRef.current && !engineRef.current.canRestart()) return;
     engineRef.current?.resumeAudio();
     engineRef.current?.restart();
     setIsNewBest(false);
@@ -168,12 +170,14 @@ export default function TMDash() {
 
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
+        if (e.repeat) return;
         if (state === 'paused') return;
         handleJump();
       } else if (e.code === 'KeyP' || e.code === 'Escape') {
         e.preventDefault();
         if (state === 'running' || state === 'paused') handlePause();
       } else if (e.code === 'Enter') {
+        if (e.repeat) return;
         if (state === 'ready') handleStart();
         else if (state === 'gameover') handleRestart();
       }
@@ -285,7 +289,10 @@ export default function TMDash() {
             <span className="font-bold tabular-nums">{fmt(best)}</span>
           </span>
           <button
-            onClick={toggleSound}
+            onClick={(e) => {
+              toggleSound();
+              e.currentTarget.blur();
+            }}
             className="p-1 sm:p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95"
             aria-label={soundOn ? 'Mute sound' : 'Unmute sound'}
           >
@@ -324,7 +331,7 @@ export default function TMDash() {
           if (target.closest('button')) return;
           handleTouchJump();
         }}
-        className="relative z-10 w-full max-w-[1000px] flex-1 max-h-[calc(100dvh-130px)] aspect-[900/360] rounded-2xl overflow-hidden border border-amber-500/30 shadow-[0_0_40px_rgba(251,191,36,0.15)] touch-none bg-[#091524] cursor-pointer mx-auto flex items-center justify-center"
+        className="relative z-10 w-full max-w-[min(1000px,calc((100dvh_-_130px)*2.5))] aspect-[900/360] rounded-2xl overflow-hidden border border-amber-500/30 shadow-[0_0_40px_rgba(251,191,36,0.15)] touch-none bg-[#091524] cursor-pointer mx-auto flex items-center justify-center"
       >
         <canvas
           ref={canvasRef}
