@@ -1,86 +1,231 @@
-type SoundName = 'jump' | 'coin' | 'crash' | 'click' | 'start' | 'warning' | 'swing' | 'whack' | 'beep' | 'splash';
+type SoundName =
+  | 'jump'
+  | 'coin'
+  | 'crash'
+  | 'click'
+  | 'start'
+  | 'warning'
+  | 'swing'
+  | 'whack'
+  | 'beep'
+  | 'splash';
+
+const MAX_VOICES = 10;
+const MASTER_VOLUME = 0.25;
+
+const SOUND_COOLDOWN_MS: Record<SoundName, number> = {
+  jump: 45,
+  coin: 40,
+  crash: 200,
+  click: 40,
+  start: 100,
+  warning: 150,
+  swing: 120,
+  whack: 120,
+  beep: 150,
+  splash: 120,
+};
+
+// Module-level shared Web Audio resources so remounts (e.g., React StrictMode)
+// reuse a single AudioContext instead of hitting browser context limits (~6).
+let sharedCtx: AudioContext | null = null;
+let sharedMaster: GainNode | null = null;
+let sharedCrashBuf: AudioBuffer | null = null;
+let sharedSplashBuf: AudioBuffer | null = null;
+let sharedWhackBuf: AudioBuffer | null = null;
+let activeManagers = 0;
+
+function getOrCreateAudioGraph(): {
+  ctx: AudioContext;
+  master: GainNode;
+} | null {
+  if (typeof window === 'undefined') return null;
+
+  if (!sharedCtx || sharedCtx.state === 'closed') {
+    const Ctor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (!Ctor) return null;
+    sharedCtx = new Ctor();
+    sharedMaster = sharedCtx.createGain();
+    sharedMaster.gain.value = MASTER_VOLUME;
+    sharedMaster.connect(sharedCtx.destination);
+    initNoiseBuffers(sharedCtx);
+  }
+
+  if (!sharedMaster) {
+    sharedMaster = sharedCtx.createGain();
+    sharedMaster.gain.value = MASTER_VOLUME;
+    sharedMaster.connect(sharedCtx.destination);
+  }
+
+  return { ctx: sharedCtx, master: sharedMaster };
+}
+
+function initNoiseBuffers(ctx: AudioContext) {
+  const sr = ctx.sampleRate;
+
+  const crashLen = Math.max(1, Math.floor(sr * 0.4));
+  const crash = ctx.createBuffer(1, crashLen, sr);
+  const crashData = crash.getChannelData(0);
+  for (let i = 0; i < crashLen; i++) {
+    crashData[i] = (Math.random() * 2 - 1) * (1 - i / crashLen);
+  }
+  sharedCrashBuf = crash;
+
+  const splashLen = Math.max(1, Math.floor(sr * 0.25));
+  const splash = ctx.createBuffer(1, splashLen, sr);
+  const splashData = splash.getChannelData(0);
+  for (let i = 0; i < splashLen; i++) {
+    splashData[i] =
+      (Math.random() * 2 - 1) * Math.exp(-i / (splashLen * 0.35));
+  }
+  sharedSplashBuf = splash;
+
+  const whackLen = Math.max(1, Math.floor(sr * 0.15));
+  const whack = ctx.createBuffer(1, whackLen, sr);
+  const whackData = whack.getChannelData(0);
+  for (let i = 0; i < whackLen; i++) {
+    whackData[i] =
+      (Math.random() * 2 - 1) * Math.exp(-i / (whackLen * 0.2));
+  }
+  sharedWhackBuf = whack;
+}
 
 export class SoundManager {
-  private ctx: AudioContext | null = null;
-  private master: GainNode | null = null;
   enabled = true;
+  private disposed = false;
+  private activeVoices = 0;
+  private lastPlayed: Partial<Record<SoundName, number>> = {};
 
-  private ensure() {
-    if (!this.ctx) {
-      const Ctor =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      this.ctx = new Ctor();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.25;
-      this.master.connect(this.ctx.destination);
+  constructor() {
+    activeManagers++;
+  }
+
+  private ensure(): { ctx: AudioContext; master: GainNode } | null {
+    if (this.disposed) return null;
+    const graph = getOrCreateAudioGraph();
+    if (!graph) return null;
+
+    const { ctx, master } = graph;
+    master.gain.value = this.enabled ? MASTER_VOLUME : 0;
+
+    const state = ctx.state as string;
+    if (this.enabled && (state === 'suspended' || state === 'interrupted')) {
+      void ctx.resume().catch(() => {
+        /* waiting for user gesture */
+      });
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
-    return this.ctx;
+    return graph;
   }
 
   resume() {
+    if (!this.enabled || this.disposed) return;
     this.ensure();
   }
 
-  toggle(): boolean {
-    this.enabled = !this.enabled;
-    return this.enabled;
-  }
-
-  // Release the AudioContext. Browsers cap the number of live contexts
-  // (roughly 6), and without this every engine remount leaked one until
-  // audio silently stopped working.
-  dispose() {
-    const ctx = this.ctx;
-    this.ctx = null;
-    this.master = null;
-    if (ctx && ctx.state !== 'closed') {
-      void ctx.close().catch(() => {
-        /* already closed */
+  suspend() {
+    if (sharedCtx && sharedCtx.state === 'running') {
+      void sharedCtx.suspend().catch(() => {
+        /* ignore if unable to suspend */
       });
     }
   }
 
+  setEnabled(next: boolean) {
+    this.enabled = next;
+    if (sharedMaster) {
+      sharedMaster.gain.value = next ? MASTER_VOLUME : 0;
+    }
+    if (next) {
+      this.resume();
+    }
+  }
+
+  toggle(): boolean {
+    this.setEnabled(!this.enabled);
+    return this.enabled;
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.activeVoices = 0;
+    this.lastPlayed = {};
+    activeManagers = Math.max(0, activeManagers - 1);
+    if (activeManagers === 0 && sharedCtx && sharedCtx.state === 'running') {
+      void sharedCtx.suspend().catch(() => {
+        /* ignore */
+      });
+    }
+  }
+
+  private trackVoice(source: AudioScheduledSourceNode, gain: GainNode) {
+    this.activeVoices++;
+    source.onended = () => {
+      source.onended = null;
+      try {
+        source.disconnect();
+        gain.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      this.activeVoices = Math.max(0, this.activeVoices - 1);
+    };
+  }
+
   play(name: SoundName) {
-    if (!this.enabled) return;
-    const ctx = this.ensure();
-    if (!this.master) return;
+    if (!this.enabled || this.disposed) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+
+    const nowMs = performance.now();
+    const prevMs = this.lastPlayed[name];
+    if (prevMs !== undefined && nowMs - prevMs < SOUND_COOLDOWN_MS[name]) return;
+    if (this.activeVoices >= MAX_VOICES) return;
+
+    const graph = this.ensure();
+    if (!graph) return;
+    const { ctx, master } = graph;
+    if (ctx.state === 'closed') return;
+
+    // Avoid queuing background/AI sounds before user interaction unlocks audio
+    if (
+      ctx.state !== 'running' &&
+      name !== 'start' &&
+      name !== 'jump' &&
+      name !== 'click'
+    ) {
+      return;
+    }
+
+    this.lastPlayed[name] = nowMs;
     const now = ctx.currentTime;
-    const out = this.master;
 
     if (name === 'crash') {
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-      }
+      if (!sharedCrashBuf) return;
       const src = ctx.createBufferSource();
-      src.buffer = buf;
+      src.buffer = sharedCrashBuf;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.8, now);
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       src.connect(g);
-      g.connect(out);
+      g.connect(master);
+      this.trackVoice(src, g);
       src.start(now);
       return;
     }
 
     if (name === 'splash') {
-      // Ocean wave / sand splash — noise only, no oscillator.
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.35));
-      }
+      if (!sharedSplashBuf) return;
       const src = ctx.createBufferSource();
-      src.buffer = buf;
+      src.buffer = sharedSplashBuf;
       const splashGain = ctx.createGain();
       splashGain.gain.setValueAtTime(0.3, now);
       splashGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
       src.connect(splashGain);
-      splashGain.connect(out);
+      splashGain.connect(master);
+      this.trackVoice(src, splashGain);
       src.start(now);
       return;
     }
@@ -88,7 +233,8 @@ export class SoundManager {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.connect(g);
-    g.connect(out);
+    g.connect(master);
+    this.trackVoice(osc, g);
 
     if (name === 'jump') {
       osc.type = 'square';
@@ -132,7 +278,6 @@ export class SoundManager {
       osc.start(now);
       osc.stop(now + 0.24);
     } else if (name === 'swing') {
-      // Whoosh sound: rapidly falling tone through bandpass
       osc.type = 'sine';
       osc.frequency.setValueAtTime(500, now);
       osc.frequency.exponentialRampToValueAtTime(90, now + 0.22);
@@ -141,22 +286,18 @@ export class SoundManager {
       osc.start(now);
       osc.stop(now + 0.25);
     } else if (name === 'whack') {
-      // Crisp strike impact
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.2));
+      if (sharedWhackBuf && this.activeVoices < MAX_VOICES) {
+        const src = ctx.createBufferSource();
+        src.buffer = sharedWhackBuf;
+        const strikeGain = ctx.createGain();
+        strikeGain.gain.setValueAtTime(0.9, now);
+        strikeGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        src.connect(strikeGain);
+        strikeGain.connect(master);
+        this.trackVoice(src, strikeGain);
+        src.start(now);
       }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      const strikeGain = ctx.createGain();
-      strikeGain.gain.setValueAtTime(0.9, now);
-      strikeGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-      src.connect(strikeGain);
-      strikeGain.connect(out);
-      src.start(now);
 
-      // Low punch thump
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(140, now);
       osc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
@@ -165,7 +306,6 @@ export class SoundManager {
       osc.start(now);
       osc.stop(now + 0.19);
     } else if (name === 'beep') {
-      // Cheerful dual-tone scooter horn (e.g. 520Hz + 780Hz)
       osc.type = 'sine';
       osc.frequency.setValueAtTime(680, now);
       osc.frequency.setValueAtTime(860, now + 0.07);

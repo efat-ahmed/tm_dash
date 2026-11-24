@@ -1,11 +1,30 @@
 export type GameState = 'ready' | 'running' | 'paused' | 'gameover';
 
+export type GraphicsQuality = 'high' | 'medium' | 'low';
+export type QualityMode = GraphicsQuality | 'auto';
+
+export interface RenderResolutionConfig {
+  dprCap?: number;
+  resolutionScale?: number;
+}
+
+export interface PerformanceMetrics {
+  currentFps: number;
+  avgFps: number;
+  frameTimeMs: number;
+  quality: GraphicsQuality;
+  qualityMode: QualityMode;
+  renderScale: number;
+}
+
 export interface EngineCallbacks {
   onStateChange: (state: GameState) => void;
   onScore: (score: number, coins: number) => void;
   onGameOver: (score: number, coins: number, best: number) => void;
   onReady?: () => void;
   onTimeOfDayChange?: (timeOfDay: string) => void;
+  onQualityChange?: (quality: GraphicsQuality) => void;
+  onPerformanceMetrics?: (metrics: PerformanceMetrics) => void;
 }
 
 export interface Player {
@@ -115,3 +134,11 @@ export interface ScooterRider {
     labelBg: string;
   };
 }
+
+export interface StickGeometry {
+  handX: number;
+  handY: number;
+  tipX: number;
+  tipY: number;
+}
+
